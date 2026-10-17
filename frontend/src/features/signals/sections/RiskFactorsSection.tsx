@@ -34,7 +34,7 @@ export function RiskFactorsSection({ sections, linked }: Props) {
               className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4 gap-y-1 border-b border-border py-2.5 first:pt-0 last:border-b-0 last:pb-0"
             >
               <span className="font-semibold">
-                <span className="mr-2 inline-block min-w-7 rounded-sm bg-primary px-1.5 text-center text-xs font-bold text-primary-foreground">
+                <span className="mr-2 inline-block min-w-7 rounded-sm bg-primary px-1.5 text-center text-sm font-bold text-primary-foreground">
                   {item.label}
                 </span>
                 {e('risk_factor', item.code)}
@@ -42,7 +42,7 @@ export function RiskFactorsSection({ sections, linked }: Props) {
               <span className="font-semibold tabular-nums">{signedWeight(item.weight)}</span>
               <div className="col-span-full">
                 <FactorEvidence evidence={item.evidence} linked={linked} anchors={false} />
-                <details className="mt-2 text-xs">
+                <details className="mt-2 text-sm">
                   <summary className="cursor-pointer text-text-2 hover:text-text">{t('riskFactors.details')}</summary>
                   <div className="mt-2">
                     <FactorDetail detail={item.detail} />

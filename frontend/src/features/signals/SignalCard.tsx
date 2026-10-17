@@ -93,7 +93,7 @@ export function SignalCard({ detail }: { detail: SignalDetail }) {
         {t('detail.back')}
       </Link>
       <PageHeader
-        title={detail.number}
+        title={<span className="font-semibold tracking-tight">{detail.number}</span>}
         subtitle={
           <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
             <SignalStatusChip status={status} />
@@ -102,69 +102,9 @@ export function SignalCard({ detail }: { detail: SignalDetail }) {
             {sections.is_demo && <DemoBadge />}
           </span>
         }
-        actions={<ActionsBar detail={detail} recipient={draft.value.recipient} dirty={draft.dirty} canSave={draft.valid} />}
       />
-
-      <section className="rounded border border-border-strong bg-surface p-3 sm:p-4" aria-labelledby="signal-next-step">
-        <p className="mb-2 text-xs font-semibold tracking-wide text-text-2 uppercase">{t('detail.workflow.label')}</p>
-        <ol aria-label={t('detail.workflow.label')} className="grid grid-cols-2 gap-2 md:grid-cols-4">
-          {(['prepare', 'send', 'answer', 'close'] as const).map((step, index) => {
-            const complete = status === 'closed' || (currentStep !== null && index < currentStep);
-            const current = currentStep !== null && index === currentStep;
-            return (
-              <li
-                key={step}
-                aria-current={current ? 'step' : undefined}
-                className={
-                  complete
-                    ? 'flex min-h-11 items-center gap-2 rounded border border-zone-green/40 bg-zone-green-bg px-2 text-sm font-medium text-zone-green-ink'
-                    : current
-                      ? 'flex min-h-11 items-center gap-2 rounded border border-primary bg-surface px-2 text-sm font-semibold text-text'
-                      : 'flex min-h-11 items-center gap-2 rounded border border-border bg-surface-sunken px-2 text-sm text-text-3'
-                }
-              >
-                <span
-                  aria-hidden="true"
-                  className={
-                    complete
-                      ? 'grid size-5 shrink-0 place-items-center rounded-full bg-zone-green-bg'
-                      : current
-                        ? 'grid size-5 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground'
-                        : 'grid size-5 shrink-0 place-items-center rounded-full border border-border-strong text-xs'
-                  }
-                >
-                  {complete ? <IconCheck size={14} /> : index + 1}
-                </span>
-                <span>{t(`detail.workflow.steps.${step}`)}</span>
-              </li>
-            );
-          })}
-        </ol>
-        <div className="mt-3 border-t border-border pt-3">
-          <p className="text-xs font-semibold tracking-wide text-text-2 uppercase">{t('detail.nextStep')}</p>
-          <h2 id="signal-next-step" className="mt-1 text-base font-semibold text-text">{nextStepTitle}</h2>
-          <p className="mt-1 text-sm text-text-2">{nextStepCopy}</p>
-          {canManageSignals && status === 'requires_confirmation' && (
-            <ul className="mt-2 flex flex-col gap-1 text-sm text-text-2">
-              {!draft.value.recipient && <li>{t('actions.needRecipient')}</li>}
-              {draft.dirty && !draft.valid && <li className="text-zone-red-ink">{t('unsaved.invalid')}</li>}
-              {draft.dirty && draft.valid && <li>{t('actions.saveFirst')}</li>}
-            </ul>
-          )}
-          {canManageSignals && status === 'returned' && draft.dirty && (
-            <p className="mt-2 text-sm text-text-2">
-              {draft.valid ? t('detail.next.saveReturned') : t('unsaved.invalid')}
-            </p>
-          )}
-          {status === 'sent' && detail.due_date && (
-            <p className="mt-2 text-sm text-text">
-              <strong>{t('detail.next.deadline')}: </strong>
-              <DueInfo dueDate={detail.due_date} status={status} isOverdue={detail.is_overdue} />
-            </p>
-          )}
-        </div>
-      </section>
-
+      <div className="grid min-w-0 items-start gap-8 xl:grid-cols-[minmax(0,1fr)_20rem]">
+      <div className="order-2 grid min-w-0 gap-8 xl:order-1">
       {status === 'returned' && detail.return_comment && (
         <Callout
           tone="warning"
@@ -187,9 +127,123 @@ export function SignalCard({ detail }: { detail: SignalDetail }) {
         </Callout>
       )}
 
-      <Panel title={t('detail.summary')}>
+      <section aria-labelledby="signal-materials-heading" className="grid min-w-0 gap-4">
+        <h2 id="signal-materials-heading" className="text-base font-semibold text-text">
+          {t('detail.groups.materials')}
+        </h2>
+        <div className="grid min-w-0 gap-6">
+          <ObjectDeveloperSection data={sections.object_developer} />
+          <RiskFactorsSection sections={sections} linked={!isRecipient} />
+          <PermitChecksSection items={sections.permit_checks} />
+          <PublicationsSection items={sections.publications} showAdLinks={!isRecipient} />
+        </div>
+      </section>
+
+      <section aria-labelledby="signal-review-heading" className="grid min-w-0 gap-4">
+        <h2 id="signal-review-heading" className="text-base font-semibold text-text">
+          {t('detail.groups.review')}
+        </h2>
+        <div className="grid min-w-0 gap-6">
+          <SchemePaymentsSection
+            value={draft.value.scheme_payments}
+            editable={editable}
+            onChange={(next) => draft.update({ scheme_payments: next })}
+          />
+          <ProposedMeasuresSection
+            value={draft.value.proposed_measures}
+            editable={editable}
+            onChange={(next) => draft.update({ proposed_measures: next })}
+          />
+          <NoteSection value={draft.value.note} editable={editable} onChange={(next) => draft.update({ note: next })} />
+        </div>
+      </section>
+
+      <section aria-labelledby="signal-route-heading" className="grid min-w-0 gap-4">
+        <h2 id="signal-route-heading" className="text-base font-semibold text-text">
+          {t('detail.groups.route')}
+        </h2>
+        <RouteSection detail={detail} value={draft.value} editable={editable} onChange={draft.update} />
+      </section>
+
+      {!isRecipient && (
+        <details className="group border-t border-border pt-4">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 text-sm font-medium text-text-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus">
+            {t('detail.historySummary')}
+            <IconChevronDown size={16} aria-hidden className="shrink-0 transition-transform duration-200 group-open:rotate-180 motion-reduce:transition-none" />
+          </summary>
+          <div className="pt-3">
+            <AuditTimeline entries={detail.audit} />
+          </div>
+        </details>
+      )}
+      </div>
+
+      <aside className="order-1 grid min-w-0 gap-6 xl:sticky xl:top-[calc(var(--header-h)_+_1.5rem)] xl:order-2">
+      <div className="grid min-w-0 gap-2">
+        <ActionsBar detail={detail} recipient={draft.value.recipient} dirty={draft.dirty} canSave={draft.valid} />
+      </div>
+      <div className="rounded-xl border border-border bg-surface p-5" aria-labelledby="signal-next-step">
+        <p className="mb-2 text-sm font-semibold text-text-2">{t('detail.workflow.label')}</p>
+        <ol aria-label={t('detail.workflow.label')} className="grid grid-cols-2 gap-2 xl:grid-cols-1">
+          {(['prepare', 'send', 'answer', 'close'] as const).map((step, index) => {
+            const complete = status === 'closed' || (currentStep !== null && index < currentStep);
+            const current = currentStep !== null && index === currentStep;
+            return (
+              <li
+                key={step}
+                aria-current={current ? 'step' : undefined}
+            className={
+                  complete
+                    ? 'flex min-h-11 items-center gap-2 rounded-lg border border-zone-green/40 bg-zone-green-bg px-3 text-sm font-medium text-zone-green-ink'
+                    : current
+                      ? 'flex min-h-11 items-center gap-2 rounded-lg border border-primary bg-surface px-3 text-sm font-semibold text-text'
+                      : 'flex min-h-11 items-center gap-2 rounded-lg border border-border bg-surface-sunken px-3 text-sm text-text-3'
+                }
+              >
+                <span
+                  aria-hidden="true"
+                  className={
+                    complete
+                      ? 'grid size-5 shrink-0 place-items-center rounded-full bg-zone-green-bg'
+                      : current
+                        ? 'grid size-5 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground'
+                        : 'grid size-5 shrink-0 place-items-center rounded-full border border-border-strong text-sm'
+                  }
+                >
+                  {complete ? <IconCheck size={14} /> : index + 1}
+                </span>
+                <span>{t(`detail.workflow.steps.${step}`)}</span>
+              </li>
+            );
+          })}
+        </ol>
+        <div className="mt-5 border-t border-border pt-4">
+          <p className="text-sm font-medium text-text-2">{t('detail.nextStep')}</p>
+          <h2 id="signal-next-step" className="mt-1 text-lg font-semibold text-text">{nextStepTitle}</h2>
+          <p className="mt-2 text-base leading-relaxed text-text-2">{nextStepCopy}</p>
+          {canManageSignals && status === 'requires_confirmation' && (
+            <ul className="mt-2 flex flex-col gap-1 text-sm text-text-2">
+              {!draft.value.recipient && <li>{t('actions.needRecipient')}</li>}
+              {draft.dirty && !draft.valid && <li className="text-zone-red-ink">{t('unsaved.invalid')}</li>}
+              {draft.dirty && draft.valid && <li>{t('actions.saveFirst')}</li>}
+            </ul>
+          )}
+          {canManageSignals && status === 'returned' && draft.dirty && (
+            <p className="mt-2 text-sm text-text-2">
+              {draft.valid ? t('detail.next.saveReturned') : t('unsaved.invalid')}
+            </p>
+          )}
+          {status === 'sent' && detail.due_date && (
+            <p className="mt-2 text-sm text-text">
+              <strong>{t('detail.next.deadline')}: </strong>
+              <DueInfo dueDate={detail.due_date} status={status} isOverdue={detail.is_overdue} />
+            </p>
+          )}
+        </div>
+      </div>
+      <Panel title={t('detail.summary')} className="rounded-xl">
         <KeyValue
-          columns={3}
+          columns={1}
           items={[
             {
               label: t('detail.fields.object'),
@@ -214,56 +268,8 @@ export function SignalCard({ detail }: { detail: SignalDetail }) {
         />
         <ZoneDisclaimer className="mt-3.5 border-t border-border pt-3" />
       </Panel>
-
-      <section aria-labelledby="signal-materials-heading" className="grid min-w-0 gap-4">
-        <h2 id="signal-materials-heading" className="text-sm font-semibold text-text">
-          {t('detail.groups.materials')}
-        </h2>
-        <div className="grid min-w-0 grid-cols-1 items-start gap-4 xl:grid-cols-2">
-          <ObjectDeveloperSection data={sections.object_developer} />
-          <RiskFactorsSection sections={sections} linked={!isRecipient} />
-          <PermitChecksSection items={sections.permit_checks} />
-          <PublicationsSection items={sections.publications} showAdLinks={!isRecipient} />
-        </div>
-      </section>
-
-      <section aria-labelledby="signal-review-heading" className="grid min-w-0 gap-4">
-        <h2 id="signal-review-heading" className="text-sm font-semibold text-text">
-          {t('detail.groups.review')}
-        </h2>
-        <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
-          <SchemePaymentsSection
-            value={draft.value.scheme_payments}
-            editable={editable}
-            onChange={(next) => draft.update({ scheme_payments: next })}
-          />
-          <ProposedMeasuresSection
-            value={draft.value.proposed_measures}
-            editable={editable}
-            onChange={(next) => draft.update({ proposed_measures: next })}
-          />
-          <NoteSection value={draft.value.note} editable={editable} onChange={(next) => draft.update({ note: next })} />
-        </div>
-      </section>
-
-      <section aria-labelledby="signal-route-heading" className="grid min-w-0 gap-4">
-        <h2 id="signal-route-heading" className="text-sm font-semibold text-text">
-          {t('detail.groups.route')}
-        </h2>
-        <RouteSection detail={detail} value={draft.value} editable={editable} onChange={draft.update} />
-      </section>
-
-      {!isRecipient && (
-        <details className="group rounded border border-border bg-surface">
-          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 px-3 text-sm font-medium text-text-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus">
-            {t('detail.historySummary')}
-            <IconChevronDown size={16} aria-hidden className="shrink-0 transition-transform group-open:rotate-180 motion-reduce:transition-none" />
-          </summary>
-          <div className="border-t border-border p-3">
-            <AuditTimeline entries={detail.audit} />
-          </div>
-        </details>
-      )}
+      </aside>
+      </div>
 
       {draft.dirty && (
         <UnsavedBar

@@ -51,7 +51,7 @@ export function OutdoorAdBox({ finding, session, config }: Props) {
       {finding.ocr_status === 'failed' && <p className="m-0 text-sm text-zone-red-ink">{t('ocr.failed')}</p>}
       {finding.ocr_status === 'done' && (
         <div className="text-sm" data-testid="vision-ocr-result">
-          <p className="m-0 text-xs text-text-3">
+          <p className="m-0 text-sm text-text-3">
             {t('ocr.rawLabel')}
             {finding.ocr_confidence !== null && ` · ${t('ocr.confidence', { value: Math.round(finding.ocr_confidence * 100) })}`}
             {finding.ocr_engine && ` · ${finding.ocr_engine}`}
@@ -87,9 +87,9 @@ export function OutdoorAdBox({ finding, session, config }: Props) {
               {t('publish.create')}
             </Button>
             {notApplicable ? (
-              <span className="text-xs text-text-3">{t('publish.notApplicable')}</span>
+              <span className="text-sm text-text-3">{t('publish.notApplicable')}</span>
             ) : (
-              !confirmed && <span className="text-xs text-text-3">{t('publish.needsConfirm')}</span>
+              !confirmed && <span className="text-sm text-text-3">{t('publish.needsConfirm')}</span>
             )}
           </div>
         </>

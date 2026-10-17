@@ -17,7 +17,7 @@ const vision = {
     findings: 'Находки',
     reviewer: 'Проверил',
   },
-  filters: { source: 'Источник', status: 'Статус', any: 'Любой' },
+  filters: { title: 'Фильтры', source: 'Источник', status: 'Статус', any: 'Любой' },
   new: {
     title: 'Новая инспекция',
     object: 'ЖК',
@@ -58,6 +58,7 @@ const vision = {
     detectorExperimental:
       'Экспериментальная нейросеть (Grounding DINO tiny, без дообучения на казахстанских стройках) — находки требуют проверки специалистом.',
     model: 'Модель: {{model}}',
+    modelLabel: 'Сведения о модели',
   },
   runs: {
     title: 'Анализ нейросетью',
@@ -66,6 +67,8 @@ const vision = {
     reanalyzeMessage: 'Все кадры инспекции будут проанализированы заново. Ручные находки и решения специалиста сохранятся.',
     empty: 'Анализ ещё не запускался.',
     list: 'Запуски анализа',
+    details: 'Подробности запуска',
+    modelVersion: 'Модель: {{model}}',
     progress: 'Кадров: {{done}} из {{total}}',
     run: 'Запуск №{{id}}',
     started: 'начат {{time}}',

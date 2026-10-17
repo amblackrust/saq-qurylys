@@ -34,7 +34,7 @@ const components: Components = {
   h1: ({ children }) => <p className="m-0 mt-3 font-semibold text-text first:mt-0">{children}</p>,
   h2: ({ children }) => <p className="m-0 mt-3 font-semibold text-text first:mt-0">{children}</p>,
   h3: ({ children }) => <p className="m-0 mt-3 font-semibold text-text first:mt-0">{children}</p>,
-  code: ({ children }) => <code className="rounded-sm bg-surface-sunken px-1 py-0.5 font-mono text-xs text-text">{children}</code>,
+  code: ({ children }) => <code className="rounded-sm bg-surface-sunken px-1 py-0.5 font-mono text-sm text-text">{children}</code>,
   pre: ({ children }) => (
     <pre className="my-2 overflow-x-auto rounded border border-border bg-surface-sunken p-2 [&_code]:bg-transparent [&_code]:p-0">{children}</pre>
   ),

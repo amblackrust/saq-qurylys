@@ -49,19 +49,19 @@ export function FramesGallery({ frames, error, onRetry, page, onPageChange, onOp
                 onClick={() => onOpen(frame.id)}
               >
                 <FrameImage frameId={frame.id} variant="preview" alt="" className="aspect-video w-full" imgClassName="object-cover" />
-                <span className="absolute bottom-1 left-1 rounded-sm bg-scrim px-1 text-2xs text-text tabular-nums">{label}</span>
+                <span className="absolute bottom-1 left-1 rounded-sm bg-scrim px-1 text-sm text-text tabular-nums">{label}</span>
                 {markedFrameIds.has(frame.id) && (
-                  <span className="absolute top-1 right-1 rounded-sm bg-primary px-1 text-2xs text-primary-foreground">
+                  <span className="absolute top-1 right-1 rounded-sm bg-primary px-1 text-sm text-primary-foreground">
                     {t('frames.marked')}
                   </span>
                 )}
                 {pendingModelFrameIds.has(frame.id) && (
-                  <span className="absolute top-1 right-1 mt-5 rounded-sm border border-dashed border-text bg-scrim px-1 text-2xs text-text">
+                  <span className="absolute top-1 right-1 mt-5 rounded-sm border border-dashed border-text bg-scrim px-1 text-sm text-text">
                     {t('frames.modelMarked')}
                   </span>
                 )}
                 {!frame.usable && (
-                  <span className="absolute top-1 left-1 rounded-sm bg-scrim px-1 text-2xs text-text-2">{t('frames.unusable')}</span>
+                  <span className="absolute top-1 left-1 rounded-sm bg-scrim px-1 text-sm text-text-2">{t('frames.unusable')}</span>
                 )}
               </button>
             </li>
@@ -76,7 +76,7 @@ export function FramesGallery({ frames, error, onRetry, page, onPageChange, onOp
       title={t('frames.title')}
       actions={
         pages > 1 && (
-          <div className="flex items-center gap-2 text-xs text-text-2">
+          <div className="flex items-center gap-2 text-sm text-text-2">
             <Button variant="ghost" size="icon-sm" aria-label={t('frames.prev')} disabled={page === 0} onClick={() => onPageChange(page - 1)}>
               <IconChevronLeft />
             </Button>

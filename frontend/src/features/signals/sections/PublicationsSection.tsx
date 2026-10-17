@@ -44,7 +44,7 @@ export function PublicationsSection({ items, showAdLinks }: Props) {
         <p className="px-3 py-2.5 text-text-3">{t('sections.empty')}</p>
       ) : (
         <>
-          <p className="px-3 py-2 text-xs text-text-3">{t('publications.hitsNote')}</p>
+          <p className="px-3 py-2 text-sm text-text-3">{t('publications.hitsNote')}</p>
           <Table>
             <TableHeader>
               <TableRow>
@@ -107,7 +107,7 @@ export function PublicationsSection({ items, showAdLinks }: Props) {
                             {item.hits.map((hit) => (
                               <li key={hit.id} className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
                                 <span>«{hit.fragment}»</span>
-                                <span className="text-xs text-text-3">{e('phrase_category', hit.category)}</span>
+                                <span className="text-sm text-text-3">{e('phrase_category', hit.category)}</span>
                                 <HitSourceChip hit={hit} />
                               </li>
                             ))}

@@ -61,7 +61,7 @@ export function FindingCard({ finding, session, config, onShow }: Props) {
             </Chip>
             <Chip tone={REVIEW_STATE_TONE[finding.review_state]}>{e('vision_review_state', finding.review_state)}</Chip>
           </div>
-          <p className="m-0 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-text-3">
+          <p className="m-0 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-text-3">
             {finding.origin === 'manual' ? (
               t('finding.originManual', { name: finding.created_by_name ?? '—' })
             ) : (
@@ -118,13 +118,13 @@ export function FindingCard({ finding, session, config, onShow }: Props) {
             {t('finding.actions.comment')}
           </Button>
         </div>
-        {trimmed === '' && <span className="text-xs text-text-3">{t('finding.notApplicableHint')}</span>}
+        {trimmed === '' && <span className="text-sm text-text-3">{t('finding.notApplicableHint')}</span>}
       </div>
 
       {finding.reviews.length > 0 && (
         <section aria-label={t('finding.history')}>
-          <h4 className="m-0 mb-1 text-2xs font-bold tracking-wider text-text-3 uppercase">{t('finding.history')}</h4>
-          <ul className="flex flex-col gap-1 text-xs text-text-2">
+          <h4 className="m-0 mb-1 text-base font-semibold text-text">{t('finding.history')}</h4>
+          <ul className="flex flex-col gap-1 text-sm text-text-2">
             {finding.reviews.map((item) => (
               <li key={item.id}>
                 <span className="tabular-nums">{f.dateTime(item.created_at)}</span> · {item.reviewer_name ?? '—'} ·{' '}

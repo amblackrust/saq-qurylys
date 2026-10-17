@@ -22,7 +22,7 @@ export function DueInfo({ dueDate, status, isOverdue }: Props) {
       <span className={cn('tabular-nums', isOverdue && 'text-zone-red-ink')}>{date(dueDate)}</span>
       {isOverdue && <Chip tone="red">{t('due.overdue')}</Chip>}
       {daysLeft !== null && (
-        <span className="text-xs text-text-3">{daysLeft > 0 ? t('due.daysLeft', { count: daysLeft }) : t('due.today')}</span>
+        <span className="text-sm text-text-3">{daysLeft > 0 ? t('due.daysLeft', { count: daysLeft }) : t('due.today')}</span>
       )}
     </span>
   );

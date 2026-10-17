@@ -7,7 +7,6 @@ import type { VisionConfig, VisionFinding, VisionSessionDetail } from '@/api/typ
 import { DemoBadge } from '@/components/DemoBadge';
 import { ObjectSelect } from '@/components/ObjectSelect';
 import { PageHeader } from '@/components/PageHeader';
-import { Panel } from '@/components/Panel';
 import { EmptyState, QueryBoundary } from '@/components/QueryState';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -131,9 +130,47 @@ function SessionView({ session, config }: { session: VisionSessionDetail; config
           </>
         }
       />
-      <div className="flex flex-col gap-4">
-        <Panel title={t('header.title')}>
-          <dl className="m-0 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
+      <div className="grid min-w-0 items-start gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(19rem,25rem)]">
+        <div className="order-2 grid min-w-0 gap-8 lg:order-1">
+        <div role="note" className="rounded-xl border border-border-strong bg-surface-sunken px-4 py-3 text-base leading-relaxed text-text-2">
+          {config.detector_mode === 'experimental_pretrained' ? (
+            <>
+              {t('banner.detectorExperimental')}
+              {config.detector_model && (
+                <>
+                  {' '}
+                  <details className="mt-2 text-sm text-text-3">
+                    <summary className="min-h-11 cursor-pointer py-2 text-text-2">{t('banner.modelLabel')}</summary>
+                    <span className="[overflow-wrap:anywhere]">{config.detector_model}</span>
+                  </details>
+                </>
+              )}
+            </>
+          ) : config.ocr_enabled ? (
+            t('banner.detectorOff')
+          ) : (
+            t('banner.detectorAndOcrOff')
+          )}
+        </div>
+        <section aria-label={t('frames.title')} className="min-w-0">
+          <FramesGallery
+            frames={frames.data}
+            error={frames.error}
+            onRetry={() => void frames.refetch()}
+            page={page}
+            onPageChange={setPage}
+            onOpen={(frameId) => setViewer({ frameId, findingId: null })}
+            markedFrameIds={markedFrameIds}
+            pendingModelFrameIds={pendingModelFrameIds}
+          />
+        </section>
+        <AssetsPanel assets={session.assets} />
+        </div>
+
+        <aside className="order-1 grid min-w-0 content-start gap-6 lg:sticky lg:top-[calc(var(--header-h)_+_1.5rem)] lg:order-2">
+          <section className="grid min-w-0 gap-4 rounded-xl border border-border bg-surface p-5">
+            <h2 className="m-0 text-lg font-semibold text-text">{t('header.title')}</h2>
+          <dl className="m-0 grid gap-x-4 gap-y-3 text-base sm:grid-cols-[auto_minmax(0,1fr)] lg:grid-cols-1">
             <dt className="text-text-3">{t('header.object')}</dt>
             <dd className="m-0">
               <ObjectField session={session} />
@@ -159,40 +196,11 @@ function SessionView({ session, config }: { session: VisionSessionDetail; config
               </>
             )}
           </dl>
-        </Panel>
-
-        <p role="note" className="m-0 rounded border border-border-strong bg-surface-sunken p-3 text-sm text-text-2">
-          {config.detector_mode === 'experimental_pretrained' ? (
-            <>
-              {t('banner.detectorExperimental')}
-              {config.detector_model && (
-                <>
-                  {' '}
-                  <span className="text-text-3 [overflow-wrap:anywhere]">{t('banner.model', { model: config.detector_model })}</span>
-                </>
-              )}
-            </>
-          ) : config.ocr_enabled ? (
-            t('banner.detectorOff')
-          ) : (
-            t('banner.detectorAndOcrOff')
-          )}
-        </p>
-
-        <RunsPanel session={session} config={config} />
-        <UploadPanel sessionId={session.id} config={config} />
-        <AssetsPanel assets={session.assets} />
-        <FramesGallery
-          frames={frames.data}
-          error={frames.error}
-          onRetry={() => void frames.refetch()}
-          page={page}
-          onPageChange={setPage}
-          onOpen={(frameId) => setViewer({ frameId, findingId: null })}
-          markedFrameIds={markedFrameIds}
-          pendingModelFrameIds={pendingModelFrameIds}
-        />
-        <FindingsPanels session={session} config={config} onShow={showFinding} />
+          </section>
+          <RunsPanel session={session} config={config} />
+          <UploadPanel sessionId={session.id} config={config} />
+          <FindingsPanels session={session} config={config} onShow={showFinding} />
+        </aside>
       </div>
       {viewer && (
         <FrameViewer

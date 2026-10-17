@@ -19,8 +19,8 @@ export function UnsavedBar({ returned, saving, canSave, onSave, onDiscard }: Pro
     >
       <div className="flex min-w-0 flex-col text-sm">
         <strong>{t('unsaved.message')}</strong>
-        {returned && <span className="text-xs text-text-3">{t('unsaved.returnedHint')}</span>}
-        {!canSave && <span className="text-xs text-zone-red-ink">{t('unsaved.invalid')}</span>}
+        {returned && <span className="text-sm text-text-3">{t('unsaved.returnedHint')}</span>}
+        {!canSave && <span className="text-sm text-zone-red-ink">{t('unsaved.invalid')}</span>}
       </div>
       <div className="flex flex-wrap gap-2">
         <Button className="min-h-11 flex-1 sm:flex-none" variant="secondary" onClick={onDiscard} disabled={saving}>

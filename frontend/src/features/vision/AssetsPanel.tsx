@@ -61,7 +61,7 @@ export function AssetsPanel({ assets }: { assets: VisionAsset[] }) {
                   </Button>
                 )}
                 {asset.status === 'failed' && asset.error_code && (
-                  <span className="basis-full text-xs text-zone-red-ink">
+                  <span className="basis-full text-sm text-zone-red-ink">
                     {tc(`errors.${asset.error_code}`, { defaultValue: asset.error_code })}
                   </span>
                 )}

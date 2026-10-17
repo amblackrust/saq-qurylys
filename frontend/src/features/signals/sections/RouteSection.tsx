@@ -44,7 +44,7 @@ export function RouteSection({ detail, value, editable, onChange }: Props) {
             allowNegative={false}
             error={value.review_days === '' ? t('route.reviewDaysRequired') : undefined}
           />
-          <p className="text-xs text-text-3">{t('route.hint')}</p>
+          <p className="text-sm text-text-3">{t('route.hint')}</p>
         </div>
       </Panel>
     );

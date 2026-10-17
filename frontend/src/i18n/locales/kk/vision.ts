@@ -20,7 +20,7 @@ const vision: typeof ru = {
     findings: 'Тұжырымдар',
     reviewer: 'Тексерген',
   },
-  filters: { source: 'Дереккөз', status: 'Күйі', any: 'Кез келген' },
+  filters: { title: 'Сүзгілер', source: 'Дереккөз', status: 'Күйі', any: 'Кез келген' },
   new: {
     title: 'Жаңа тексеру',
     object: 'Объект',
@@ -61,6 +61,7 @@ const vision: typeof ru = {
     detectorExperimental:
       'Эксперименттік нейрожелі (Grounding DINO tiny, қазақстандық құрылыс алаңдарына бейімделмеген) — тұжырымдарды маман тексеруі қажет.',
     model: 'Модель: {{model}}',
+    modelLabel: 'Модель туралы',
   },
   runs: {
     title: 'Нейрожелімен талдау',
@@ -69,6 +70,8 @@ const vision: typeof ru = {
     reanalyzeMessage: 'Тексерудің барлық кадрлары қайта талданады. Қолмен белгіленген тұжырымдар мен маман шешімдері сақталады.',
     empty: 'Талдау әлі іске қосылмаған.',
     list: 'Талдау іске қосулары',
+    details: 'Іске қосу мәліметтері',
+    modelVersion: 'Модель: {{model}}',
     progress: 'Кадрлар: {{done}} / {{total}}',
     run: 'Іске қосу №{{id}}',
     started: 'басталды: {{time}}',

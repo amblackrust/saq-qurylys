@@ -103,7 +103,7 @@ export function SignalsPage() {
         return (
           <div className="flex min-w-36 flex-col items-start gap-1">
             <SignalStatusChip status={rowStatus} />
-            <span className="text-xs text-text-2">{nextStep}</span>
+            <span className="text-sm text-text-2">{nextStep}</span>
           </div>
         );
       },
@@ -153,13 +153,14 @@ export function SignalsPage() {
           )
         }
       />
-      <div className="mb-4 grid gap-3">
+      <div className="grid min-w-0 items-start gap-6 xl:grid-cols-[17rem_minmax(0,1fr)]">
+      <aside className="grid min-w-0 content-start gap-5 rounded-xl border border-border bg-surface p-4">
         <div>
-          <p className="mb-2 text-sm font-medium text-text">{t('list.filters.status')}</p>
-          <div role="group" aria-label={t('list.filters.status')} className="flex flex-wrap gap-2">
+          <p className="mb-3 text-base font-semibold text-text">{t('list.filters.status')}</p>
+          <div role="group" aria-label={t('list.filters.status')} className="flex flex-col gap-1">
             <Button
               variant={status === undefined ? 'default' : 'outline'}
-              className="min-h-11"
+              className="min-h-11 justify-start"
               aria-pressed={status === undefined}
               onClick={() => setParam({ status: null, page: null })}
             >
@@ -169,7 +170,7 @@ export function SignalsPage() {
               <Button
                 key={filterStatus}
                 variant={status === filterStatus ? 'default' : 'outline'}
-                className="min-h-11"
+                className="min-h-11 justify-start"
                 aria-pressed={status === filterStatus}
                 onClick={() => setParam({ status: filterStatus, page: null })}
               >
@@ -209,7 +210,8 @@ export function SignalsPage() {
             )}
           </div>
         )}
-      </div>
+      </aside>
+      <div className="min-w-0">
       {query.isError && !query.data ? (
         <ErrorBlock error={query.error} onRetry={() => void query.refetch()} />
       ) : (
@@ -227,6 +229,8 @@ export function SignalsPage() {
           emptyText={emptyText}
         />
       )}
+      </div>
+      </div>
       <ZoneDisclaimer className="mt-3" />
       <CreateSignalModal opened={createOpen} onClose={() => setCreateOpen(false)} />
     </>

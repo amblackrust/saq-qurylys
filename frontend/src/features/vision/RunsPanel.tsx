@@ -36,11 +36,18 @@ function RunRow({ run }: { run: VisionRun }) {
       >
         <span className="block h-full rounded-full bg-primary" style={{ width: `${percent}%` }} />
       </span>
-      <span className="text-xs text-text-2 tabular-nums">{t('runs.progress', { done: run.frames_done, total: run.frames_total })}</span>
-      <span className="text-xs text-text-3 [overflow-wrap:anywhere]">{run.model_version}</span>
-      {time && <span className="text-xs text-text-3 tabular-nums">{time}</span>}
+      <span className="text-sm text-text-2 tabular-nums">{t('runs.progress', { done: run.frames_done, total: run.frames_total })}</span>
+      {(run.model_version || time) && (
+        <details className="basis-full rounded-lg bg-surface-sunken px-3 text-sm text-text-2">
+          <summary className="min-h-11 cursor-pointer py-3">{t('runs.details')}</summary>
+          <div className="grid gap-1 pb-3 pl-4 text-sm text-text-3">
+            {run.model_version && <span className="[overflow-wrap:anywhere]">{t('runs.modelVersion', { model: run.model_version })}</span>}
+            {time && <span className="tabular-nums">{time}</span>}
+          </div>
+        </details>
+      )}
       {run.status === 'failed' && (
-        <span className="basis-full text-xs text-zone-red-ink">
+        <span className="basis-full text-sm text-zone-red-ink">
           {run.error_code ? tc(`errors.${run.error_code}`, { defaultValue: t('runs.errorFallback') }) : t('runs.errorFallback')}
         </span>
       )}
@@ -91,7 +98,7 @@ export function RunsPanel({ session, config }: { session: VisionSessionDetail; c
         )}
         {latest && (
           <section aria-label={t('runs.summaryTitle', { id: latest.id })}>
-            <h4 className="m-0 mb-1 text-2xs font-bold tracking-wider text-text-3 uppercase">{t('runs.summaryTitle', { id: latest.id })}</h4>
+            <h4 className="m-0 mb-1 text-base font-semibold text-text">{t('runs.summaryTitle', { id: latest.id })}</h4>
             <ul className="m-0 grid list-none gap-x-6 gap-y-1 p-0 text-sm sm:grid-cols-2">
               {DETECTED_CATEGORIES.map((category) => {
                 const count = latest.summary[category] ?? 0;

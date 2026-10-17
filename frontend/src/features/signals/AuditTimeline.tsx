@@ -57,12 +57,12 @@ export function AuditTimeline({ entries }: { entries: AuditEntry[] }) {
               >
                 <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
                   <span className="text-sm font-semibold">{key ? t(`audit.actions.${key}`) : entry.action}</span>
-                  <span className="text-xs text-text-3 tabular-nums">
+                  <span className="text-sm text-text-3 tabular-nums">
                     {user} · {dateTime(entry.at)}
                   </span>
                 </div>
                 {rows.length > 0 && (
-                  <details className="mt-0.5 text-xs">
+                  <details className="mt-0.5 text-sm">
                     <summary className="inline-block cursor-pointer text-link hover:underline">{t('audit.changes', { count: rows.length })}</summary>
                     <dl className="mt-1.5 grid grid-cols-1 gap-x-3.5 gap-y-1 rounded border border-border bg-surface-sunken px-3 py-2 sm:grid-cols-[max-content_minmax(0,1fr)]">
                       {rows.slice(0, MAX_ROWS).map((row) => {

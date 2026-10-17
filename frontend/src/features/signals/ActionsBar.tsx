@@ -99,7 +99,7 @@ export function ActionsBar({ detail, recipient, dirty, canSave }: Props) {
                   </TooltipTrigger>
                   <TooltipContent>{sendBlocker}</TooltipContent>
                 </Tooltip>
-                <span role="status" className="max-w-56 text-xs text-text-2">
+                <span role="status" className="max-w-56 text-sm text-text-2">
                   {sendBlocker}
                 </span>
               </div>

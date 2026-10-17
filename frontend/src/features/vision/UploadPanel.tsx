@@ -117,7 +117,7 @@ export function UploadPanel({ sessionId, config }: Props) {
           {t('upload.choose')}
         </Button>
         <p className="m-0">{t('upload.hint')}</p>
-        <p className="m-0 text-xs text-text-3">
+        <p className="m-0 text-sm text-text-3">
           {t('upload.limits', { photo: config.max_photo_mb, video: config.max_video_mb, minutes: Math.round(config.max_duration_seconds / 60) })}
         </p>
       </div>
@@ -143,7 +143,7 @@ export function UploadPanel({ sessionId, config }: Props) {
               <Chip tone={item.state === 'done' ? 'green' : item.state === 'error' ? 'red' : item.state === 'duplicate' ? 'yellow' : 'neutral'}>
                 {t(`upload.state.${item.state}`, { percent: item.progress })}
               </Chip>
-              {item.error && <span className="basis-full text-xs text-zone-red-ink">{item.error}</span>}
+              {item.error && <span className="basis-full text-sm text-zone-red-ink">{item.error}</span>}
             </li>
           ))}
         </ul>

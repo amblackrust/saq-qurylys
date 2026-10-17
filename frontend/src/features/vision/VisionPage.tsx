@@ -111,7 +111,9 @@ export function VisionPage() {
           </Button>
         }
       />
-      <div className="mb-3 grid max-w-xl gap-3 sm:grid-cols-2">
+      <div className="grid min-w-0 items-start gap-6 xl:grid-cols-[17rem_minmax(0,1fr)]">
+      <aside className="grid min-w-0 content-start gap-5 rounded-xl border border-border bg-surface p-4">
+        <h2 className="m-0 text-base font-semibold text-text">{t('filters.title')}</h2>
         <SelectInput
           label={t('filters.source')}
           data={options('vision_source', SOURCES)}
@@ -128,7 +130,8 @@ export function VisionPage() {
           placeholder={t('filters.any')}
           onChange={(value) => setFilters({ status: value })}
         />
-      </div>
+      </aside>
+      <div className="min-w-0">
       {query.isError && !query.data ? (
         <ErrorBlock error={query.error} onRetry={() => void query.refetch()} />
       ) : (
@@ -146,6 +149,8 @@ export function VisionPage() {
           emptyText={status || source ? t('emptyFiltered') : t('empty')}
         />
       )}
+      </div>
+      </div>
       {creating && <NewSessionDialog opened onClose={() => setCreating(false)} />}
     </>
   );

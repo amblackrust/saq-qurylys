@@ -26,9 +26,9 @@ export function Callout({ tone = 'neutral', icon, title, children, meta, multili
         {icon}
       </span>
       <div className="min-w-0">
-        <h3 className="mb-0.5 font-heading text-xs font-bold tracking-wider uppercase">{title}</h3>
+        <h3 className="mb-0.5 text-base font-semibold text-text">{title}</h3>
         {children && <div className={cn('break-words', multiline && 'whitespace-pre-wrap')}>{children}</div>}
-        {meta && <p className="mt-1 text-xs text-text-3">{meta}</p>}
+        {meta && <p className="mt-1 text-sm text-text-3">{meta}</p>}
       </div>
     </div>
   );

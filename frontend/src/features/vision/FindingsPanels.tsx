@@ -32,7 +32,7 @@ export function FindingsPanels({ session, config, onShow }: Props) {
           id={`vision-findings-${block.id}`}
           actions={
             block.id === 'site' && (
-              <div className="flex items-center gap-1.5 text-xs text-text-2" role="group" aria-label={t('finding.filterLabel')}>
+              <div className="flex items-center gap-1.5 text-sm text-text-2" role="group" aria-label={t('finding.filterLabel')}>
                 <span>{t('finding.filterLabel')}:</span>
                 <Button size="xs" variant={onlyPending ? 'secondary' : 'default'} aria-pressed={!onlyPending} onClick={() => setOnlyPending(false)}>
                   {t('finding.filterAll')}

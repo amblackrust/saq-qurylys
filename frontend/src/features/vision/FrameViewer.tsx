@@ -48,6 +48,7 @@ export function FrameViewer({ session, frameId, frames, focusFindingId, onFrameC
   // a frame outside the gallery page on screen (opened from a finding) has no metadata here: name it by its number
   const label = !frame ? t('viewer.frameNumber', { id: frameId }) : frame.timestamp_ms != null ? formatTimestamp(frame.timestamp_ms) : t('frames.photo');
   const findings = session.findings.filter((finding) => finding.frame_id === frameId && finding.bbox);
+  const focusedFinding = focusFindingId === null ? null : session.findings.find((finding) => finding.id === focusFindingId) ?? null;
 
   const reset = () => {
     setAnchor(null);
@@ -116,40 +117,19 @@ export function FrameViewer({ session, frameId, frames, focusFindingId, onFrameC
 
   return (
     <Dialog open onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="sm:max-w-5xl" aria-describedby={undefined}>
+      <DialogContent className="h-[min(92dvh,60rem)] w-[calc(100%-1.5rem)] max-w-[88rem] sm:max-w-[88rem] grid-rows-[auto_minmax(0,1fr)] gap-4 overflow-hidden p-5" aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>{t('viewer.title', { label })}</DialogTitle>
         </DialogHeader>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="secondary" size="sm" aria-label={t('viewer.prev')} disabled={index <= 0} onClick={() => move(-1)}>
-            <IconChevronLeft />
-          </Button>
-          <Button variant="secondary" size="sm" aria-label={t('viewer.next')} disabled={index < 0 || index >= frames.length - 1} onClick={() => move(1)}>
-            <IconChevronRight />
-          </Button>
-          <Button
-            variant={drawing ? 'default' : 'secondary'}
-            size="sm"
-            aria-pressed={drawing}
-            disabled={!ready}
-            onClick={() => {
-              setDrawing(!drawing);
-              reset();
-            }}
-          >
-            <IconFocus2 />
-            {t('viewer.draw')}
-          </Button>
-          <span className="text-xs text-text-3">{drawing ? t('viewer.drawHint') : t('viewer.original')}</span>
-        </div>
-        <div className="flex max-h-[62vh] justify-center overflow-auto rounded bg-surface-sunken">
+        <div className="grid min-h-0 min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="order-1 flex min-h-0 min-w-0 items-center justify-center overflow-auto rounded-xl bg-surface-sunken p-2 lg:p-4">
           {/* the wrapper shrink-wraps the image (block, no object-fit), so the overlay covers exactly the rendered pixels */}
-          <div className={cn('relative inline-block max-w-full self-start', !ready && 'min-h-24 min-w-24')} data-testid="vision-frame-canvas">
+          <div className={cn('relative inline-block max-w-full self-center', !ready && 'min-h-24 min-w-24')} data-testid="vision-frame-canvas">
             <FrameImage
               frameId={frameId}
               variant="original"
               alt={t('viewer.imageAlt', { label })}
-              className="h-auto max-h-[60vh] w-auto max-w-full"
+              className="h-auto max-h-[78vh] w-auto max-w-full"
               onLoad={() => setLoadedFrameId(frameId)}
             />
             <div
@@ -172,7 +152,7 @@ export function FrameViewer({ session, frameId, frames, focusFindingId, onFrameC
                     style={box(finding.bbox)}
                     data-origin={finding.origin}
                   >
-                    <span className="absolute -top-px left-0 -translate-y-full bg-primary px-1 text-2xs whitespace-nowrap text-primary-foreground">
+                    <span className="absolute -top-px left-0 -translate-y-full bg-primary px-1 text-sm whitespace-nowrap text-primary-foreground">
                       {finding.origin === 'model' && finding.confidence !== null
                         ? t('viewer.modelBox', {
                             category: e('vision_category', finding.category),
@@ -187,8 +167,38 @@ export function FrameViewer({ session, frameId, frames, focusFindingId, onFrameC
             </div>
           </div>
         </div>
+        <aside className="order-2 grid min-h-0 content-start gap-4 overflow-y-auto lg:border-l lg:border-border lg:pl-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="secondary" size="sm" aria-label={t('viewer.prev')} disabled={index <= 0} onClick={() => move(-1)}>
+            <IconChevronLeft />
+          </Button>
+          <Button variant="secondary" size="sm" aria-label={t('viewer.next')} disabled={index < 0 || index >= frames.length - 1} onClick={() => move(1)}>
+            <IconChevronRight />
+          </Button>
+          <Button
+            variant={drawing ? 'default' : 'secondary'}
+            size="sm"
+            aria-pressed={drawing}
+            disabled={!ready}
+            onClick={() => {
+              setDrawing(!drawing);
+              reset();
+            }}
+          >
+            <IconFocus2 />
+            {t('viewer.draw')}
+          </Button>
+          <span className="basis-full text-sm leading-relaxed text-text-2">{drawing ? t('viewer.drawHint') : t('viewer.original')}</span>
+        </div>
+        {focusedFinding && (
+          <section className="grid gap-2 rounded-xl border border-border bg-surface p-4" aria-label={t('finding.label', { id: focusedFinding.id })}>
+            <h3 className="m-0 text-base font-semibold text-text">{e('vision_category', focusedFinding.category)}</h3>
+            <p className="m-0 text-sm text-text-2">{e('vision_finding_status', focusedFinding.status)}</p>
+            {focusedFinding.note && <p className="m-0 text-base leading-relaxed text-text-2">{focusedFinding.note}</p>}
+          </section>
+        )}
         {draft && (
-          <div className="flex flex-col gap-3 rounded border border-border p-3" role="group" aria-label={t('viewer.newFinding')}>
+          <div className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-4" role="group" aria-label={t('viewer.newFinding')}>
             <div className="grid gap-3 sm:grid-cols-2">
               <SelectInput
                 label={t('finding.category')}
@@ -215,6 +225,8 @@ export function FrameViewer({ session, frameId, frames, focusFindingId, onFrameC
             </div>
           </div>
         )}
+        </aside>
+        </div>
       </DialogContent>
     </Dialog>
   );

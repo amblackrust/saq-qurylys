@@ -39,8 +39,8 @@ function Greeting() {
   return (
     <div className="flex flex-col gap-1">
       <IconSparkles className="mb-2 size-6 text-accent-text" aria-hidden />
-      <h2 className="m-0 font-heading text-lg font-bold text-text">{t(`greeting.${part}`)}</h2>
-      <p className="m-0 text-sm text-text-3">{t('greeting.subtitle')}</p>
+      <h2 className="m-0 text-2xl font-semibold tracking-tight text-text">{t(`greeting.${part}`)}</h2>
+      <p className="m-0 text-base leading-relaxed text-text-2">{t('greeting.subtitle')}</p>
     </div>
   );
 }
@@ -111,16 +111,49 @@ export function AssistantPanel({ open, expanded, onToggleExpanded, onClose }: Pr
       onClick={onPanelClick}
       className={cn(
         'fixed inset-0 z-50 flex flex-col bg-surface text-text',
+        expanded && 'min-[62em]:flex-row',
         'min-[62em]:inset-auto min-[62em]:top-(--header-h) min-[62em]:right-0 min-[62em]:bottom-0 min-[62em]:z-30 min-[62em]:border-l min-[62em]:border-border min-[62em]:shadow-window',
-        'animate-in duration-150 fade-in-0 motion-reduce:animate-none min-[62em]:slide-in-from-right-4',
+        'animate-in duration-200 fade-in-0 motion-reduce:animate-none min-[62em]:slide-in-from-right-4',
         'min-[62em]:w-(--assistant-w)',
       )}
     >
+      {expanded && (
+        <nav aria-label={t('conversations')} className="hidden min-h-0 w-56 flex-none flex-col border-r border-border p-3 min-[62em]:flex">
+          <Button variant="secondary" className="mb-3 w-full justify-start" onClick={chat.startNew}>
+            <IconPlus aria-hidden />
+            {t('newConversation')}
+          </Button>
+          <ul className="m-0 flex min-h-0 list-none flex-col gap-1 overflow-y-auto p-0">
+            {chat.conversations.map((conversation) => (
+              <li key={conversation.id} className="flex min-w-0 items-center gap-1">
+                <button
+                  type="button"
+                  aria-current={conversation.id === chat.active?.id ? 'page' : undefined}
+                  className="min-h-10 min-w-0 flex-1 truncate rounded-lg px-3 text-left text-sm text-text-2 outline-none hover:bg-hover hover:text-text focus-visible:ring-1 focus-visible:ring-focus aria-[current=page]:bg-surface-sunken aria-[current=page]:text-text"
+                  onClick={() => chat.select(conversation.id)}
+                >
+                  {conversation.title}
+                </button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t('deleteConversation', { title: conversation.title })}
+                  onClick={() => chat.remove(conversation.id)}
+                >
+                  <IconTrash />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      )}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="flex flex-none items-center gap-1 border-b border-border px-2 py-1.5">
+        <div className={cn('min-w-0 flex-1', expanded && 'min-[62em]:hidden')}>
         <Popover open={listOpen} onOpenChange={setListOpen}>
           <PopoverTrigger asChild>
             <Button variant="ghost" className="min-w-0 flex-1 justify-start px-2 max-[62em]:h-11" aria-label={t('conversations')}>
-              <span className="truncate font-heading text-2xs font-bold tracking-wider uppercase">{chat.active?.title ?? t('newConversation')}</span>
+              <span className="truncate text-sm font-semibold">{chat.active?.title ?? t('newConversation')}</span>
               <IconChevronDown className="ml-auto" aria-hidden />
             </Button>
           </PopoverTrigger>
@@ -166,13 +199,25 @@ export function AssistantPanel({ open, expanded, onToggleExpanded, onClose }: Pr
             </ul>
           </PopoverContent>
         </Popover>
-        <Button variant="ghost" size="icon" className={headerButtonClass} aria-label={t('newConversation')} onClick={chat.startNew}>
+        </div>
+        {expanded && (
+          <h2 className="m-0 hidden min-w-0 flex-1 truncate px-2 text-base font-semibold text-text min-[62em]:block">
+            {chat.active?.title ?? t('newConversation')}
+          </h2>
+        )}
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn(headerButtonClass, expanded && 'min-[62em]:hidden')}
+          aria-label={t('newConversation')}
+          onClick={chat.startNew}
+        >
           <IconPlus />
         </Button>
         <Button
           variant="ghost"
           size="icon"
-          className={cn(headerButtonClass, 'max-[62em]:hidden')}
+          className={cn(headerButtonClass, !expanded && 'max-[62em]:hidden')}
           aria-label={expanded ? t('collapse') : t('expand')}
           aria-pressed={expanded}
           onClick={onToggleExpanded}
@@ -203,14 +248,14 @@ export function AssistantPanel({ open, expanded, onToggleExpanded, onClose }: Pr
                     <button
                       type="button"
                       onClick={() => submit(title)}
-                      className="flex w-full cursor-pointer items-start gap-3 rounded border border-border bg-surface p-3 text-left outline-none transition-colors duration-(--dur) hover:bg-hover focus-visible:ring-1 focus-visible:ring-focus"
+                      className="flex w-full cursor-pointer items-start gap-3 rounded-xl border border-border bg-surface p-4 text-left outline-none transition-colors duration-200 hover:bg-hover focus-visible:ring-1 focus-visible:ring-focus"
                     >
                       <span className="grid size-8 flex-none place-items-center rounded bg-surface-sunken text-accent-text">
                         <StarterIcon className="size-4" aria-hidden />
                       </span>
                       <span className="flex min-w-0 flex-col gap-0.5">
-                        <span className="text-sm font-semibold text-text">{title}</span>
-                        <span className="text-xs text-text-3">{t(`starters.${kind}.${index}.subtitle`)}</span>
+                        <span className="text-base font-semibold text-text">{title}</span>
+                        <span className="text-sm leading-relaxed text-text-2">{t(`starters.${kind}.${index}.subtitle`)}</span>
                       </span>
                     </button>
                   </li>
@@ -244,14 +289,14 @@ export function AssistantPanel({ open, expanded, onToggleExpanded, onClose }: Pr
             placeholder={t('placeholder')}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={onComposerKeyDown}
-            className="max-h-40 min-h-9 resize-none rounded-b-none border-0 bg-transparent px-2.5 py-2 ring-0 hover:border-0 focus-visible:border-0 focus-visible:ring-0"
+            className="max-h-40 min-h-11 resize-none rounded-b-none border-0 bg-transparent px-3 py-3 text-base leading-relaxed ring-0 hover:border-0 focus-visible:border-0 focus-visible:ring-0"
           />
           <div className="flex items-center gap-2 px-1.5 pb-1.5">
             <div className="min-w-0 flex-1">
               {withContext && (
                 <span
                   title={t('context.hint')}
-                  className="inline-flex h-5 max-w-full items-center gap-1 rounded border border-border bg-surface pr-0.5 pl-1.5 text-2xs text-text-2"
+                  className="inline-flex min-h-7 max-w-full items-center gap-1 rounded-md border border-border bg-surface pr-0.5 pl-2 text-sm text-text-2"
                 >
                   <IconFileText className="size-3 flex-none" aria-hidden />
                   <span className="truncate">{contextLabel}</span>
@@ -277,7 +322,8 @@ export function AssistantPanel({ open, expanded, onToggleExpanded, onClose }: Pr
             )}
           </div>
         </div>
-        <p className="m-0 text-center text-2xs text-text-3">{t('disclaimer')}</p>
+        <p className="m-0 text-center text-sm text-text-3">{t('disclaimer')}</p>
+      </div>
       </div>
     </aside>
   );
