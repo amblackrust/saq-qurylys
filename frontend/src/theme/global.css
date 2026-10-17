@@ -5,8 +5,7 @@
 @layer base {
   html {
     -webkit-text-size-adjust: 100%;
-    /* Quiet scrollbars that blend into the surface instead of the browser's default track. */
-    scrollbar-color: rgba(235, 232, 253, 0.22) transparent;
+    scrollbar-color: color-mix(in srgb, var(--text-3) 32%, transparent) transparent;
   }
 
   body {
@@ -14,7 +13,7 @@
     background: var(--bg);
     color: var(--text);
     font-family: var(--font-sans);
-    font-size: 14px;
+    font-size: 16px;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -74,7 +73,7 @@
   }
 
   ::selection {
-    background: rgba(240, 3, 91, 0.35);
+    background: color-mix(in srgb, var(--accent) 28%, transparent);
     color: var(--text);
   }
 

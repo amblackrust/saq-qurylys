@@ -16,13 +16,13 @@ function TabsList({ className, ...props }: React.ComponentProps<typeof TabsPrimi
   );
 }
 
-/** Caps label with an optional icon; inactive text-3, active pink with a pink underline (not color alone). */
+/** Section tabs with a clear active underline and readable touch target. */
 function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.Trigger>) {
   return (
     <TabsPrimitive.Trigger
       data-slot="tabs-trigger"
       className={cn(
-        "-mb-px inline-flex h-8 items-center justify-center gap-1.5 border-b-2 border-transparent px-0.5 text-xs font-semibold tracking-wider whitespace-nowrap text-text-3 uppercase outline-none transition-colors duration-(--dur) hover:text-text focus-visible:ring-1 focus-visible:ring-focus disabled:pointer-events-none disabled:text-text-disabled data-active:border-primary data-active:text-accent-text group-data-vertical/tabs:-mr-px group-data-vertical/tabs:mb-0 group-data-vertical/tabs:justify-start group-data-vertical/tabs:border-r-2 group-data-vertical/tabs:border-b-0 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "-mb-px inline-flex min-h-11 items-center justify-center gap-2 border-b-2 border-transparent px-3 text-sm font-medium whitespace-nowrap text-text-2 outline-none transition-colors duration-(--dur) hover:text-text focus-visible:ring-1 focus-visible:ring-focus disabled:pointer-events-none disabled:text-text-disabled data-active:border-primary data-active:text-accent-text group-data-vertical/tabs:-mr-px group-data-vertical/tabs:mb-0 group-data-vertical/tabs:justify-start group-data-vertical/tabs:border-r-2 group-data-vertical/tabs:border-b-0 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className,
       )}
       {...props}

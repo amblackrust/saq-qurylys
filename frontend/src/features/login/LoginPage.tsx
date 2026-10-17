@@ -9,8 +9,8 @@ import { errorMessage } from '@/api/queryClient';
 import { useAuth } from '@/auth/useAuth';
 import { PasswordInput } from '@/components/form/PasswordInput';
 import { TextInput } from '@/components/form/TextInput';
-import GlitchText from '@/components/fx/GlitchText';
 import { Button } from '@/components/ui/button';
+import { AppearanceMenu } from '@/layout/AppearanceMenu';
 import { LanguageSwitch } from '@/layout/LanguageSwitch';
 
 export function LoginPage() {
@@ -48,24 +48,27 @@ export function LoginPage() {
   });
 
   return (
-    <div className="relative grid min-h-dvh place-items-center bg-bg px-(--gutter) py-6">
-      <div className="absolute top-4 right-(--gutter)">
+    <div className="relative grid min-h-dvh place-items-center bg-bg px-(--gutter) py-24">
+      <div className="absolute top-4 right-(--gutter) flex items-center gap-2">
+        <div className="w-48 max-sm:w-44"><AppearanceMenu /></div>
         <LanguageSwitch />
       </div>
-      <div className="flex w-full flex-col items-center gap-8">
-        <GlitchText className="font-heading text-3xl font-bold sm:text-5xl" bursts>
-          SAQ QURYLYS
-        </GlitchText>
+      <div className="flex w-full max-w-[480px] flex-col items-center gap-6">
+        <div className="flex items-center gap-3 text-text">
+          <span className="grid size-12 place-items-center rounded-2xl bg-primary text-lg font-bold text-primary-foreground">S</span>
+          <span className="text-xl font-semibold tracking-tight">SAQ QURYLYS</span>
+        </div>
         <form
-          className="w-full max-w-[400px] overflow-hidden rounded-lg border border-primary/40 bg-surface"
+          className="w-full overflow-hidden rounded-2xl border border-border bg-surface shadow-2"
           onSubmit={submit}
           noValidate
         >
-          <div className="border-b border-border bg-surface-raised px-4 py-2">
-            <h1 className="font-heading text-xs font-bold tracking-wider text-text uppercase">{t('auth.title')}</h1>
+          <div className="border-b border-border px-7 pt-7 pb-5">
+            <h1 className="text-2xl font-semibold tracking-tight text-text">{t('auth.title')}</h1>
+            <p className="mt-2 text-[15px] text-text-2">{t('auth.description')}</p>
           </div>
-          <div className="p-5">
-            <div className="flex flex-col gap-3">
+          <div className="p-7 max-sm:p-5">
+            <div className="flex flex-col gap-5">
               <TextInput label={t('auth.username')} autoComplete="username" autoFocus error={errors.username?.message} {...register('username')} />
               <PasswordInput
                 label={t('auth.password')}
@@ -75,11 +78,11 @@ export function LoginPage() {
               />
             </div>
             {error && (
-              <p className="mt-3 text-sm text-zone-red-ink" role="alert">
+              <p className="mt-4 text-sm text-zone-red-ink" role="alert">
                 {error}
               </p>
             )}
-            <Button type="submit" className="mt-5 w-full" loading={submitting}>
+            <Button type="submit" className="mt-6 w-full" loading={submitting}>
               {t('auth.login')}
             </Button>
           </div>

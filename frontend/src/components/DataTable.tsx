@@ -62,7 +62,7 @@ export function DataTable<T extends RowData>({
   const to = Math.min(total, (pageIndex + 1) * pageSize);
 
   return (
-    <div className="overflow-hidden rounded border border-border bg-surface">
+    <div className="overflow-hidden rounded-2xl border border-border bg-surface shadow-1">
       <Table>
         <TableHeader className="bg-surface-sunken">
           {table.getHeaderGroups().map((group) => (
@@ -108,8 +108,8 @@ export function DataTable<T extends RowData>({
         </TableBody>
       </Table>
       {!loading && data.length === 0 && <EmptyState>{emptyText}</EmptyState>}
-      <footer className="flex min-h-9 items-center justify-between gap-3 border-t border-border px-3 py-1 text-xs">
-        <span className="text-text-3 tabular-nums">{t('pagination.range', { from, to, total })}</span>
+      <footer className="flex min-h-14 items-center justify-between gap-3 border-t border-border px-4 py-2 text-sm">
+        <span className="text-text-2 tabular-nums">{t('pagination.range', { from, to, total })}</span>
         {pageCount > 1 && (
           <div className="flex items-center gap-2 text-text-2">
             <Button

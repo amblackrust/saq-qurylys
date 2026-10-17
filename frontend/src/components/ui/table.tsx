@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { cn } from '@/lib/utils';
 
-/** Dense table: ~32px rows, 10px caps headers in text-3, hover fill, `border` row dividers. */
+/** Readable table with comfortable row spacing, hover fill, and semantic row dividers. */
 function Table({ className, ...props }: React.ComponentProps<'table'>) {
   return (
     <div data-slot="table-container" className="relative w-full overflow-x-auto">
@@ -36,18 +36,18 @@ function TableHead({ className, ...props }: React.ComponentProps<'th'>) {
   return (
     <th
       data-slot="table-head"
-      className={cn('h-7 px-2 text-left align-middle text-3xs font-semibold tracking-wider whitespace-nowrap text-text-3 uppercase [&:has([role=checkbox])]:pr-0', className)}
+      className={cn('h-11 px-3 text-left align-middle text-[13px] font-semibold whitespace-nowrap text-text-2 [&:has([role=checkbox])]:pr-0', className)}
       {...props}
     />
   );
 }
 
 function TableCell({ className, ...props }: React.ComponentProps<'td'>) {
-  return <td data-slot="table-cell" className={cn('h-8 px-2 py-1 align-middle text-sm text-text [&:has([role=checkbox])]:pr-0', className)} {...props} />;
+  return <td data-slot="table-cell" className={cn('h-11 px-3 py-2 align-middle text-sm text-text [&:has([role=checkbox])]:pr-0', className)} {...props} />;
 }
 
 function TableCaption({ className, ...props }: React.ComponentProps<'caption'>) {
-  return <caption data-slot="table-caption" className={cn('mt-3 text-xs text-text-3', className)} {...props} />;
+  return <caption data-slot="table-caption" className={cn('mt-3 text-[13px] text-text-3', className)} {...props} />;
 }
 
 export { Table, TableHeader, TableBody, TableFooter, TableHead, TableRow, TableCell, TableCaption };

@@ -9,7 +9,7 @@ function FieldSet({ className, ...props }: React.ComponentProps<'fieldset'>) {
 }
 
 function FieldLegend({ className, ...props }: React.ComponentProps<'legend'>) {
-  return <legend data-slot="field-legend" className={cn('mb-1.5 text-2xs font-bold tracking-wider text-text uppercase', className)} {...props} />;
+  return <legend data-slot="field-legend" className={cn('mb-1.5 text-sm font-semibold text-text', className)} {...props} />;
 }
 
 function FieldGroup({ className, ...props }: React.ComponentProps<'div'>) {
@@ -40,11 +40,11 @@ function FieldLabel({ className, ...props }: React.ComponentProps<typeof Label>)
 }
 
 function FieldTitle({ className, ...props }: React.ComponentProps<'div'>) {
-  return <div data-slot="field-label" className={cn('flex w-fit items-center gap-2 text-xs font-medium text-text-2', className)} {...props} />;
+  return <div data-slot="field-label" className={cn('flex w-fit items-center gap-2 text-sm font-medium text-text-2', className)} {...props} />;
 }
 
 function FieldDescription({ className, ...props }: React.ComponentProps<'p'>) {
-  return <p data-slot="field-description" className={cn('text-xs leading-snug font-normal text-text-3 [&>a]:text-link [&>a]:underline [&>a]:underline-offset-2', className)} {...props} />;
+  return <p data-slot="field-description" className={cn('text-[13px] leading-snug font-normal text-text-3 [&>a]:text-link [&>a]:underline [&>a]:underline-offset-2', className)} {...props} />;
 }
 
 function FieldSeparator({ children, className, ...props }: React.ComponentProps<'div'> & { children?: React.ReactNode }) {
@@ -77,7 +77,7 @@ function FieldError({
 
   if (!content) return null;
   return (
-    <div data-slot="field-error" className={cn('text-xs font-normal text-zone-red-ink', className)} {...props}>
+    <div data-slot="field-error" className={cn('text-[13px] font-normal text-zone-red-ink', className)} {...props}>
       {content}
     </div>
   );

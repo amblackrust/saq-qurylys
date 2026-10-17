@@ -60,7 +60,7 @@ function SelectContent({ className, children, position = 'popper', align = 'star
 }
 
 function SelectLabel({ className, ...props }: React.ComponentProps<typeof SelectPrimitive.Label>) {
-  return <SelectPrimitive.Label data-slot="select-label" className={cn('px-2 py-1 text-3xs font-semibold tracking-wider text-text-3 uppercase', className)} {...props} />;
+  return <SelectPrimitive.Label data-slot="select-label" className={cn('px-3 py-2 text-[13px] font-semibold text-text-2', className)} {...props} />;
 }
 
 function SelectItem({ className, children, ...props }: React.ComponentProps<typeof SelectPrimitive.Item>) {

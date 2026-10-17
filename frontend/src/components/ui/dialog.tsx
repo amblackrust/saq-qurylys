@@ -35,8 +35,7 @@ function DialogOverlay({ className, ...props }: React.ComponentProps<typeof Dial
 }
 
 /**
- * A window: raised surface, pink-tinted shadow. Width: `sm:max-w-sm` by default, override with `className`
- * (`sm:max-w-lg` for forms). Lay out as `DialogHeader` (caption bar), body, `DialogFooter`.
+ * A raised surface for focused tasks. Width: `sm:max-w-sm` by default, override with `className` (`sm:max-w-lg` for forms).
  */
 function DialogContent({
   className,
@@ -89,7 +88,7 @@ function DialogTitle({ className, ...props }: React.ComponentProps<typeof Dialog
   return (
     <DialogPrimitive.Title
       data-slot="dialog-title"
-      className={cn('text-xs leading-snug font-bold tracking-wider text-text uppercase', className)}
+      className={cn('text-lg leading-snug font-semibold tracking-tight text-text', className)}
       {...props}
     />
   );

@@ -12,7 +12,7 @@ function InputGroup({ className, ...props }: React.ComponentProps<'div'>) {
       data-slot="input-group"
       role="group"
       className={cn(
-        'group/input-group relative flex h-7 w-full min-w-0 items-center rounded border border-border-strong bg-surface-sunken text-sm text-text-2 transition-[color,border-color,box-shadow] duration-(--dur) outline-none has-[[data-slot=input-group-control]:focus-visible]:border-focus has-[[data-slot=input-group-control]:focus-visible]:ring-1 has-[[data-slot=input-group-control]:focus-visible]:ring-focus has-[[data-slot=input-group-control][aria-invalid=true]]:border-zone-red has-[[data-slot=input-group-control][aria-invalid=true]]:ring-1 has-[[data-slot=input-group-control][aria-invalid=true]]:ring-zone-red has-disabled:opacity-50 has-[>textarea]:h-auto',
+        'group/input-group relative flex min-h-11 w-full min-w-0 items-center rounded border border-border-strong bg-surface-sunken text-sm text-text transition-[color,border-color,box-shadow] duration-(--dur) outline-none has-[[data-slot=input-group-control]:focus-visible]:border-focus has-[[data-slot=input-group-control]:focus-visible]:ring-1 has-[[data-slot=input-group-control]:focus-visible]:ring-focus has-[[data-slot=input-group-control][aria-invalid=true]]:border-zone-red has-[[data-slot=input-group-control][aria-invalid=true]]:ring-1 has-[[data-slot=input-group-control][aria-invalid=true]]:ring-zone-red has-disabled:opacity-50 has-[>textarea]:h-auto',
         className,
       )}
       {...props}

@@ -16,7 +16,7 @@ function ToggleGroup({ className, size = 'md', children, ...props }: React.Compo
       data-slot="toggle-group"
       data-size={size}
       className={cn(
-        'inline-flex w-fit items-stretch gap-px rounded border border-border-strong bg-surface-sunken p-px data-[size=md]:h-7 data-[size=sm]:h-6',
+        'inline-flex min-h-11 w-fit items-stretch gap-px rounded-lg border border-border bg-surface-sunken p-0.5',
         className,
       )}
       {...props}
@@ -31,7 +31,7 @@ function ToggleGroupItem({ className, children, ...props }: React.ComponentProps
   return (
     <ToggleGroupPrimitive.Item
       data-slot="toggle-group-item"
-      className={cn(toggleVariants({ size }), 'h-full min-w-0 rounded-[2px] focus-visible:z-10', className)}
+      className={cn(toggleVariants({ size }), 'h-full min-h-11 min-w-0 rounded-md focus-visible:z-10', className)}
       {...props}
     >
       {children}

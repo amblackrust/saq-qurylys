@@ -1,71 +1,137 @@
-import { Suspense, useRef, type CSSProperties } from 'react';
-import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
+import { Suspense, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { Link, NavLink, Outlet, useLocation } from 'react-router';
 import {
   IconBuildingSkyscraper,
-  IconChevronDown,
-  IconDots,
+  IconChartDots3,
   IconEye,
-  IconListCheck,
+  IconLayoutDashboard,
   IconMap2,
+  IconMenu2,
   IconRss,
   IconSend,
   IconSettings,
   IconSparkles,
   IconSpeakerphone,
-  IconTopologyStar3,
+  IconX,
 } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import { useAssistantEnabled } from '@/api/hooks/assistant';
 import { useVisionEnabled } from '@/api/hooks/vision';
 import { useAuth } from '@/auth/useAuth';
 import { LoadingBlock } from '@/components/QueryState';
-import { cn } from '@/lib/utils';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
+import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { AssistantPanel } from '@/features/assistant/AssistantPanel';
 import { usePanelState } from '@/features/assistant/usePanelState';
+import { cn } from '@/lib/utils';
 import { ActivityIsland } from './ActivityIsland';
+import { AppearanceMenu } from './AppearanceMenu';
 import { LanguageSwitch } from './LanguageSwitch';
 import { NotificationsBell } from './NotificationsBell';
 import { UserMenu } from './UserMenu';
 
-const navLinkClass =
-  'group flex h-12 min-h-11 flex-none items-center gap-1.5 px-3 font-heading text-xs font-semibold tracking-wider whitespace-nowrap text-text-3 uppercase no-underline outline-none ' +
-  'transition-colors duration-(--dur) hover:text-text-2 focus-visible:text-text-2 focus-visible:ring-2 focus-visible:ring-focus aria-[current=page]:text-accent-text aria-[current=page]:[text-shadow:0_0_14px_var(--accent-glow)] [&_svg]:size-4 [&_svg]:shrink-0 ' +
-  'max-[62em]:h-11 max-[62em]:w-full max-[62em]:min-w-0 max-[62em]:flex-col max-[62em]:justify-center max-[62em]:gap-1 max-[62em]:px-0.5 max-[62em]:py-1 max-[62em]:text-2xs max-[62em]:tracking-normal max-[62em]:leading-none';
+interface RouteItem {
+  to: string;
+  label: string;
+  icon: ReactNode;
+  end?: boolean;
+}
+
+const itemClass = ({ isActive }: { isActive: boolean }) =>
+  cn(
+    'flex min-h-11 items-center gap-3 rounded-lg px-3 text-[15px] font-medium no-underline transition-colors duration-(--dur)',
+    'text-text-2 hover:bg-hover hover:text-text focus-visible:ring-2 focus-visible:ring-focus',
+    isActive && 'bg-hover text-accent-text hover:bg-hover hover:text-accent-text',
+  );
+
+function RouteLink({ item, onNavigate }: { item: RouteItem; onNavigate?: () => void }) {
+  return (
+    <NavLink to={item.to} end={item.end} className={itemClass} onClick={onNavigate}>
+      <span className="grid size-6 shrink-0 place-items-center [&_svg]:size-5" aria-hidden>
+        {item.icon}
+      </span>
+      <span>{item.label}</span>
+    </NavLink>
+  );
+}
+
+function RouteGroup({ title, items, onNavigate }: { title: string; items: RouteItem[]; onNavigate?: () => void }) {
+  if (!items.length) return null;
+  return (
+    <section className="flex flex-col gap-1" aria-label={title}>
+      <h2 className="px-3 pb-1 text-[13px] font-semibold text-text-3">{title}</h2>
+      {items.map((item) => <RouteLink key={item.to} item={item} onNavigate={onNavigate} />)}
+    </section>
+  );
+}
 
 export function AppLayout() {
   const { t } = useTranslation();
   const { canSeeRegistry, canEditRegistry, isAdmin } = useAuth();
   const location = useLocation();
-  const navigate = useNavigate();
   const visionEnabled = useVisionEnabled();
   const assistantEnabled = useAssistantEnabled();
   const assistant = usePanelState();
   const askAiRef = useRef<HTMLButtonElement>(null);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const assistantOpen = assistantEnabled && assistant.open;
+
+  useEffect(() => {
+    const desktopQuery = window.matchMedia('(min-width: 64rem)');
+    const closeOnDesktop = () => {
+      if (desktopQuery.matches) setMobileNavOpen(false);
+    };
+    desktopQuery.addEventListener('change', closeOnDesktop);
+    return () => desktopQuery.removeEventListener('change', closeOnDesktop);
+  }, []);
+
+  const flowItems: RouteItem[] = [
+    ...(canSeeRegistry ? [{ to: '/work', label: t('nav.work'), icon: <IconLayoutDashboard /> }] : []),
+    ...(canSeeRegistry ? [{ to: '/ads', label: t('nav.ads'), icon: <IconSpeakerphone /> }] : []),
+    ...(canSeeRegistry ? [{ to: '/objects', label: t('nav.objects'), icon: <IconBuildingSkyscraper /> }] : []),
+    { to: '/signals', label: t('nav.signals'), icon: <IconSend /> },
+  ];
+  const exploreItems: RouteItem[] = canSeeRegistry ? [
+    { to: '/map', label: t('nav.map'), icon: <IconMap2 /> },
+    { to: '/graph', label: t('nav.graph'), icon: <IconChartDots3 /> },
+  ] : [];
+  const toolsItems: RouteItem[] = [
+    ...(canEditRegistry ? [{ to: '/sources', label: t('nav.sources'), icon: <IconRss /> }] : []),
+    ...(canSeeRegistry && visionEnabled ? [{ to: '/vision', label: t('nav.vision'), icon: <IconEye /> }] : []),
+    ...(isAdmin ? [{ to: '/admin', label: t('nav.admin'), icon: <IconSettings /> }] : []),
+  ];
+
+  const pageTitle = [...flowItems, ...exploreItems, ...toolsItems].find(({ to }) =>
+    location.pathname === to || location.pathname.startsWith(`${to}/`),
+  )?.label ?? t('appName');
 
   const closeAssistant = () => {
     assistant.setOpen(false);
     askAiRef.current?.focus();
   };
 
-  const toolItems = [
-    { to: '/map', label: t('nav.map'), icon: <IconMap2 />, visible: canSeeRegistry },
-    { to: '/graph', label: t('nav.graph'), icon: <IconTopologyStar3 />, visible: canSeeRegistry },
-    { to: '/sources', label: t('nav.sources'), icon: <IconRss />, visible: canEditRegistry },
-    { to: '/vision', label: t('nav.vision'), icon: <IconEye />, visible: canSeeRegistry && visionEnabled },
-    { to: '/admin', label: t('nav.admin'), icon: <IconSettings />, visible: isAdmin },
-  ].filter((item) => item.visible);
-  const activeTool = toolItems.find(
-    ({ to }) => location.pathname === to || location.pathname.startsWith(`${to}/`),
+  const sidebar = (onNavigate?: () => void) => (
+    <>
+      <Link to="/" aria-label={t('appName')} onClick={onNavigate} className="flex h-16 items-center gap-3 px-4 text-text no-underline">
+        <span className="grid size-10 place-items-center rounded-xl bg-primary text-base font-bold text-primary-foreground">S</span>
+        <span className="flex flex-col leading-tight">
+          <span className="text-[15px] font-semibold tracking-tight">SAQ QURYLYS</span>
+          <span className="mt-1 text-[13px] text-text-3">{t('nav.workspace')}</span>
+        </span>
+      </Link>
+      <nav aria-label={t('header.menu')} className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-3 py-4">
+        <RouteGroup title={t('nav.sectionWork')} items={flowItems} onNavigate={onNavigate} />
+        {canSeeRegistry && <RouteGroup title={t('nav.sectionExplore')} items={exploreItems} onNavigate={onNavigate} />}
+        <RouteGroup title={t('nav.sectionTools')} items={toolsItems} onNavigate={onNavigate} />
+      </nav>
+      <div className="flex flex-col gap-2 border-t border-border p-3">
+        <AppearanceMenu />
+        <div className="flex items-center justify-between gap-2">
+          <LanguageSwitch />
+          <UserMenu />
+        </div>
+      </div>
+    </>
   );
 
   return (
@@ -73,125 +139,74 @@ export function AppLayout() {
       className="min-h-dvh"
       style={{ '--assistant-w': assistant.expanded ? 'min(640px, 60vw)' : 'min(400px, 40vw)' } as CSSProperties}
     >
-      <header className="sticky top-0 z-40 border-b border-border bg-surface-raised">
-        <div className="mx-auto flex min-h-14 max-w-(--page-max) items-center gap-6 px-(--gutter) max-[62em]:min-h-12 max-[62em]:flex-wrap max-[62em]:gap-x-1 max-[62em]:gap-y-0">
-          <Link
-            to="/"
-            aria-label={t('appName')}
-            className="flex min-h-11 flex-none items-center font-heading text-sm font-bold tracking-widest whitespace-nowrap text-text no-underline focus-visible:ring-2 focus-visible:ring-focus max-[62em]:text-xs max-[62em]:tracking-wide"
-          >
-            SAQ <span className="ml-1 text-accent-text [text-shadow:0_0_14px_var(--accent-glow)] max-[24em]:hidden">QURYLYS</span>
-          </Link>
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-(--sidebar-w) flex-col border-r border-border bg-surface-glass backdrop-blur-xl lg:flex">
+        {sidebar()}
+      </aside>
 
-          <nav
-            className={`-mx-3 flex min-w-0 flex-1 items-center overflow-x-auto [scrollbar-width:none] max-[62em]:order-3 max-[62em]:mx-0 max-[62em]:grid max-[62em]:gap-0 max-[62em]:overflow-visible [&::-webkit-scrollbar]:hidden ${canSeeRegistry ? 'max-[62em]:basis-full max-[62em]:grid-cols-5' : 'max-[62em]:w-fit max-[62em]:flex-none max-[62em]:basis-auto max-[62em]:grid-cols-1'}`}
-            aria-label={t('header.menu')}
-          >
-            {canSeeRegistry && (
-              <NavLink to="/work" className={navLinkClass} aria-label={t('nav.work')}>
-                <IconListCheck aria-hidden />
-                <span className="max-[62em]:hidden">{t('nav.work')}</span>
-                <span className="hidden max-[62em]:inline">{t('nav.workShort')}</span>
-              </NavLink>
-            )}
-            {canSeeRegistry && (
-              <NavLink to="/ads" className={navLinkClass} aria-label={t('nav.ads')}>
-                <IconSpeakerphone aria-hidden />
-                <span className="max-[62em]:hidden">{t('nav.ads')}</span>
-                <span className="hidden max-[62em]:inline">{t('nav.adsShort')}</span>
-              </NavLink>
-            )}
-            {canSeeRegistry && (
-              <NavLink to="/objects" className={navLinkClass} aria-label={t('nav.objects')}>
-                <IconBuildingSkyscraper aria-hidden />
-                <span className="max-[62em]:hidden">{t('nav.objects')}</span>
-                <span className="hidden max-[62em]:inline">{t('nav.objectsShort')}</span>
-              </NavLink>
-            )}
-            <NavLink to="/signals" className={navLinkClass} aria-label={t('nav.cards')}>
-              <IconSend aria-hidden />
-              <span className="max-[62em]:hidden">{t('nav.cards')}</span>
-              <span className="hidden max-[62em]:inline">{t('nav.cardsShort')}</span>
-            </NavLink>
-
-            {canSeeRegistry && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    className={navLinkClass}
-                    aria-label={activeTool ? t('nav.toolsCurrent', { current: activeTool.label }) : t('nav.tools')}
-                    aria-current={activeTool ? 'page' : undefined}
-                  >
-                    <IconDots className="hidden size-4 max-[62em]:block" aria-hidden />
-                    <span className="hidden max-[62em]:inline">{t('nav.more')}</span>
-                    <span className="max-[62em]:hidden">
-                      {t('nav.tools')}
-                      {activeTool && <span className="text-text-3"> · {activeTool.label}</span>}
-                    </span>
-                    <IconChevronDown className="size-4 max-[62em]:hidden" aria-hidden />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="min-w-52">
-                  <DropdownMenuLabel>{t('nav.tools')}</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  {toolItems.map((item) => {
-                    const current = activeTool?.to === item.to;
-                    return (
-                      <DropdownMenuItem
-                        key={item.to}
-                        className="min-h-11 gap-2 font-heading text-xs font-semibold tracking-wider uppercase data-[current=true]:text-accent-text"
-                        data-current={current || undefined}
-                        aria-current={current ? 'page' : undefined}
-                        onSelect={() => void navigate(item.to)}
-                      >
-                        {item.icon}
-                        {item.label}
-                      </DropdownMenuItem>
-                    );
-                  })}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-          </nav>
-
-          <div role="group" aria-label={t('header.utilities')} className="ml-auto flex flex-none items-center gap-1">
-            {assistantEnabled && (
-              <Button
-                ref={askAiRef}
-                variant="ghost"
-                size="icon"
-                className="size-11"
-                aria-label={t('header.askAi')}
-                title={t('header.askAi')}
-                aria-pressed={assistantOpen}
-                onClick={() => (assistantOpen ? closeAssistant() : assistant.setOpen(true))}
+      <div className="min-h-dvh lg:ml-(--sidebar-w)">
+        <header className="sticky top-0 z-40 border-b border-border bg-surface-glass backdrop-blur-xl">
+          <div className="flex h-(--header-h) items-center gap-3 px-(--gutter)">
+            <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+              <SheetTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-11 lg:hidden"
+                  aria-label={mobileNavOpen ? t('close') : t('header.menu')}
+                >
+                  {mobileNavOpen ? <IconX /> : <IconMenu2 />}
+                </Button>
+              </SheetTrigger>
+              <SheetContent
+                side="left"
+                className="w-[min(320px,88vw)] max-w-none gap-0 p-0 lg:hidden"
+                showCloseButton={false}
+                onCloseAutoFocus={(event) => {
+                  if (window.matchMedia('(min-width: 64rem)').matches) {
+                    event.preventDefault();
+                    document.querySelector<HTMLElement>('[data-page-title]')?.focus();
+                  }
+                }}
               >
-                <IconSparkles />
-              </Button>
-            )}
-            <LanguageSwitch />
-            <NotificationsBell />
-            <UserMenu />
+                <SheetTitle className="sr-only">{t('header.menu')}</SheetTitle>
+                {sidebar(() => setMobileNavOpen(false))}
+              </SheetContent>
+            </Sheet>
+            <div className="min-w-0 flex-1 lg:flex-none">
+              <h1 data-page-title tabIndex={-1} className="truncate text-lg font-semibold tracking-tight text-text">{pageTitle}</h1>
+            </div>
+            <div role="group" aria-label={t('header.utilities')} className="ml-auto flex items-center gap-1">
+              {assistantEnabled && (
+                <Button
+                  ref={askAiRef}
+                  variant="ghost"
+                  size="icon"
+                  className="size-11"
+                  aria-label={t('header.askAi')}
+                  title={t('header.askAi')}
+                  aria-pressed={assistantOpen}
+                  onClick={() => (assistantOpen ? closeAssistant() : assistant.setOpen(true))}
+                >
+                  <IconSparkles />
+                </Button>
+              )}
+              <NotificationsBell />
+              <div className="lg:hidden"><UserMenu /></div>
+            </div>
           </div>
+          {canSeeRegistry && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-0">
+              <div className="relative h-0 px-(--gutter)"><ActivityIsland /></div>
+            </div>
+          )}
+        </header>
+        <div className={cn(assistantOpen && 'min-[62em]:pr-(--assistant-w)')}>
+          <main className="mx-auto min-h-[calc(100dvh-var(--header-h))] max-w-(--page-max) px-(--gutter) pt-8 pb-14 max-sm:pt-6">
+            <Suspense fallback={<LoadingBlock />}>
+              <div className="animate-in duration-200 fade-in-0 slide-in-from-bottom-1"><Outlet /></div>
+            </Suspense>
+          </main>
         </div>
-        {canSeeRegistry && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0">
-            <div className="relative mx-auto h-0 max-w-(--page-max) px-(--gutter)">
-              <ActivityIsland />
-            </div>
-          </div>
-        )}
-      </header>
-      {/* The docked panel starts below the header, so only the content makes room for it and the header keeps its full width. */}
-      <div className={cn(assistantOpen && 'min-[62em]:pr-(--assistant-w)')}>
-        <main className="mx-auto max-w-(--page-max) px-(--gutter) pt-6 pb-14">
-          <Suspense fallback={<LoadingBlock />}>
-            <div className="animate-in duration-200 fade-in-0 slide-in-from-bottom-1">
-              <Outlet />
-            </div>
-          </Suspense>
-        </main>
       </div>
       {assistantEnabled && (
         <AssistantPanel open={assistantOpen} expanded={assistant.expanded} onToggleExpanded={assistant.toggleExpanded} onClose={closeAssistant} />

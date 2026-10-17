@@ -46,6 +46,16 @@ const common = {
     cardsShort: 'Карточки',
     toolsCurrent: 'Инструменты. Текущий раздел: {{current}}',
     admin: 'Администрирование',
+    workspace: 'Рабочее пространство',
+    sectionWork: 'Работа',
+    sectionExplore: 'Обзор',
+    sectionTools: 'Инструменты',
+  },
+  appearance: {
+    title: 'Оформление',
+    system: 'Система',
+    light: 'Светлая',
+    dark: 'Тёмная',
   },
   work: {
     title: 'Задачи',
@@ -86,6 +96,7 @@ const common = {
   },
   auth: {
     title: 'Вход в систему',
+    description: 'Рабочее пространство для проверки объявлений и обращений.',
     username: 'Логин',
     password: 'Пароль',
     login: 'Войти',

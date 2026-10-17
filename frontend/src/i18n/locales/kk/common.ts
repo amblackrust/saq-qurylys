@@ -49,6 +49,16 @@ const common: typeof ru = {
     cardsShort: 'Карточка',
     toolsCurrent: 'Құралдар. Ағымдағы бөлім: {{current}}',
     admin: 'Әкімшілік',
+    workspace: 'Жұмыс кеңістігі',
+    sectionWork: 'Жұмыс',
+    sectionExplore: 'Шолу',
+    sectionTools: 'Құралдар',
+  },
+  appearance: {
+    title: 'Көрінісі',
+    system: 'Жүйе',
+    light: 'Ашық',
+    dark: 'Қараңғы',
   },
   work: {
     title: 'Тапсырмалар',
@@ -89,6 +99,7 @@ const common: typeof ru = {
   },
   auth: {
     title: 'Жүйеге кіру',
+    description: 'Хабарландырулар мен өтініштерді тексеруге арналған жұмыс кеңістігі.',
     username: 'Логин',
     password: 'Құпиясөз',
     login: 'Кіру',

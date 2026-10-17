@@ -4,11 +4,11 @@ import { Slot } from 'radix-ui';
 import { cn } from '@/lib/utils';
 
 /**
- * Chip: 10px caps on a tinted background. `green | yellow | red | none` are the zone tones (zones only!),
+ * Status chip on a semantic tinted background. `green | yellow | red | none` are the zone tones (zones only!),
  * `default` is the pink brand tone, `secondary` the neutral one.
  */
 const badgeVariants = cva(
-  'inline-flex h-[18px] w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-sm border border-transparent px-1.5 text-3xs font-semibold tracking-wider whitespace-nowrap uppercase [&>svg]:pointer-events-none [&>svg]:size-3',
+  'inline-flex min-h-7 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded border border-transparent px-2 text-[13px] font-medium whitespace-nowrap [&>svg]:pointer-events-none [&>svg]:size-4',
   {
     variants: {
       variant: {

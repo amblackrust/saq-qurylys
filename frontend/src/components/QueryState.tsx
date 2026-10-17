@@ -6,7 +6,7 @@ import { errorMessage } from '@/api/queryClient';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 
-const blockClass = 'flex flex-col items-center justify-center gap-2 px-4 py-9 text-center text-sm text-text-2';
+const blockClass = 'flex min-h-40 flex-col items-center justify-center gap-3 px-6 py-10 text-center text-base text-text-2';
 
 export function LoadingBlock({ label }: { label?: string }) {
   const { t } = useTranslation();
@@ -22,7 +22,7 @@ export function ErrorBlock({ error, onRetry }: { error: unknown; onRetry?: () =>
   const { t } = useTranslation();
   return (
     <div className={blockClass} role="alert">
-      <IconAlertTriangle size={22} stroke={1.6} className="text-zone-red-ink" />
+      <IconAlertTriangle size={24} stroke={1.7} className="text-zone-red-ink" />
       <strong className="text-text">{t('states.loadError')}</strong>
       <span className="max-w-[460px] text-text-3">{errorMessage(error)}</span>
       {onRetry && (
@@ -38,7 +38,7 @@ export function EmptyState({ children, action }: { children?: ReactNode; action?
   const { t } = useTranslation();
   return (
     <div className={blockClass}>
-      <IconInbox size={22} stroke={1.6} className="text-text-3" />
+      <IconInbox size={24} stroke={1.7} className="text-text-3" />
       <span>{children ?? t('states.empty')}</span>
       {action}
     </div>
