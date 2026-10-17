@@ -42,52 +42,42 @@ export function SourcesPage() {
           </>
         }
       />
-      <div className="flex flex-col gap-5">
-        <section
-          className={
-            collectors.data && disabledCount > 0
-              ? 'flex flex-col gap-2 rounded border border-zone-yellow/40 bg-zone-yellow-bg px-3.5 py-3 sm:flex-row sm:items-center sm:justify-between'
-              : 'flex flex-col gap-2 rounded border border-border bg-surface px-3.5 py-3 sm:flex-row sm:items-center sm:justify-between'
-          }
-          aria-label={t('collectors.title')}
-        >
+      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)]">
+        <section aria-label={t('title')} className="min-w-0 overflow-hidden rounded-xl border border-border bg-surface">
+          <QueryBoundary query={accounts}>
+            {(rows) => <SourcesTable accounts={rows} collectors={collectors.data} />}
+          </QueryBoundary>
+        </section>
+        <aside className="min-w-0 rounded-xl border border-border bg-surface p-4" aria-label={t('collectors.title')}>
+          <h2 className="mb-3 text-lg font-semibold">{t('collectors.title')}</h2>
           {collectors.data ? (
-            <div className="min-w-0">
-              <p className="m-0 text-sm font-semibold">{t('collectors.summary', { enabled: enabledCount, total: COLLECTOR_SOURCES.length })}</p>
-              {disabledCount > 0 && <p className="mb-0 mt-1 text-sm text-text-2">{t('collectors.offHint')}</p>}
+            <div className="mb-4 border-b border-border pb-4">
+              <p className="m-0 text-base font-semibold">{t('collectors.summary', { enabled: enabledCount, total: COLLECTOR_SOURCES.length })}</p>
+              {disabledCount > 0 && <p className="mb-0 mt-2 text-sm leading-5 text-text-2">{t('collectors.offHint')}</p>}
+              {disabledCount > 0 && (
+                <Button className="mt-3 min-h-11 w-full" variant="secondary" size="sm" asChild>
+                  <Link to="/ads">{t('collectors.manualAdd')}</Link>
+                </Button>
+              )}
             </div>
-          ) : collectors.isPending ? (
-            <p className="m-0 text-sm text-text-2" role="status">{t('collectors.loading')}</p>
           ) : null}
-          {collectors.data && disabledCount > 0 && (
-            <Button className="shrink-0 max-sm:min-h-11" variant="secondary" size="sm" asChild>
-              <Link to="/ads">{t('collectors.manualAdd')}</Link>
-            </Button>
-          )}
-          {collectors.isError && (
-            <div className="flex flex-wrap items-center gap-2 text-sm text-zone-red-ink" role="alert">
+          {collectors.isError ? (
+            <div className="mb-4 flex flex-wrap items-center gap-2 text-sm text-zone-red-ink" role="alert">
               <IconAlertTriangle className="size-4 shrink-0" aria-hidden />
               <span>{t('collectors.loadError')}</span>
               <Button variant="secondary" size="xs" onClick={() => void collectors.refetch()}>
                 {t('retry', { ns: 'common' })}
               </Button>
             </div>
+          ) : collectors.isPending ? (
+            <p className="m-0 mb-4 text-sm text-text-2" role="status">{t('collectors.loading')}</p>
+          ) : (
+            <>
+              <p className="mb-3 text-sm leading-5 text-text-2">{t('collectors.configNote')}</p>
+              <CollectorBadges collectors={collectors.data ?? []} />
+            </>
           )}
-        </section>
-        <QueryBoundary query={accounts}>
-          {(rows) => <SourcesTable accounts={rows} collectors={collectors.data} />}
-        </QueryBoundary>
-        <details className="rounded border border-border bg-surface px-3.5 py-3">
-          <summary className="flex cursor-pointer items-center text-sm font-semibold text-text-2 hover:text-text max-sm:min-h-11">
-            {collectors.data
-              ? t('collectors.details', { enabled: enabledCount, total: COLLECTOR_SOURCES.length })
-              : t('collectors.title')}
-          </summary>
-          <div className="mt-3 flex flex-col gap-2.5">
-            <p className="m-0 text-sm text-text-2">{t('collectors.configNote')}</p>
-            <QueryBoundary query={collectors}>{(items) => <CollectorBadges collectors={items} />}</QueryBoundary>
-          </div>
-        </details>
+        </aside>
       </div>
       {adding && <SourceFormModal onClose={() => setAdding(false)} />}
     </>

@@ -23,7 +23,7 @@ export function Legend() {
       {TYPES.map((type) => (
         <li
           key={type}
-          className="inline-flex items-center gap-1.5 rounded-sm border border-border bg-surface-sunken py-0.5 pr-2.5 pl-1.5 text-2xs font-bold tracking-wider text-text-2 uppercase"
+          className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface-sunken px-2.5 py-1.5 text-sm font-medium text-text-2"
         >
           <Swatch type={type} />
           {t(`legend.${type}`)}

@@ -41,7 +41,7 @@ export function ZoneCounters({ counts, active, onToggle, animated = true }: Prop
             CARD,
             ZONE_TONE[zone],
             'cursor-pointer outline-none transition-[box-shadow,filter,border-color] duration-(--dur) hover:brightness-125 focus-visible:ring-1 focus-visible:ring-focus',
-            'aria-pressed:border-primary aria-pressed:shadow-glow',
+            'aria-pressed:border-primary aria-pressed:ring-1 aria-pressed:ring-primary',
           )}
           aria-pressed={active === zone}
           onClick={() => onToggle(zone)}

@@ -4,6 +4,7 @@ import { useElementSize } from '@/lib/hooks';
 import { IconArrowsMaximize } from '@tabler/icons-react';
 import ForceGraph2D, { type ForceGraphMethods, type LinkObject, type NodeObject } from 'react-force-graph-2d';
 import { useTranslation } from 'react-i18next';
+import { useTheme } from '@/theme/ThemeProvider';
 import type { GraphEdge, GraphNode, GraphNodeType, LinkGraph } from '@/api/types';
 import { prefersReducedMotion } from '@/features/map/mapStyle';
 import { formatPhone } from './graphModel';
@@ -18,7 +19,7 @@ type CanvasLink = LinkObject<GraphNode, EdgeData>;
 const NODE_SIZE: Record<GraphNodeType, number> = { developer: 8, object: 8, phone: 6, account: 6, ad: 3.5 };
 /** Zoom level from which the label of a node is always drawn. */
 const LABEL_SCALE: Record<GraphNodeType, number> = { developer: 1.4, object: 1.4, phone: 1.8, account: 1.8, ad: 3 };
-const DIMMED_ALPHA = 0.1;
+const DIMMED_ALPHA = 0.22;
 const LABEL_FONT_PX = 12;
 const LABEL_MAX_CHARS = 42;
 const FIT_PADDING = 48;
@@ -126,13 +127,17 @@ interface Props {
 
 export function LinkGraphCanvas({ graph, highlight, seedId, onNodeClick, onBackgroundClick }: Props) {
   const { t } = useTranslation('graph');
+  const { resolvedTheme } = useTheme();
   const { ref, width, height } = useElementSize();
   const fgRef = useRef<ForceGraphMethods<GraphNode, EdgeData> | undefined>(undefined);
   const hoveredId = useRef<string | null>(null);
   const fitted = useRef(false);
   const previousHighlight = useRef<Set<string> | null>(null);
   const labels = useRef<PendingLabel[]>([]);
-  const palette = useMemo(() => readGraphPalette(), []);
+  const palette = useMemo(() => {
+    void resolvedTheme;
+    return readGraphPalette();
+  }, [resolvedTheme]);
   const reducedMotion = useMemo(() => prefersReducedMotion(), []);
   const ready = width > 0 && height > 0;
 

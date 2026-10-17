@@ -143,82 +143,88 @@ export function ObjectsPage() {
           )
         }
       />
-      <p className="mb-4 text-sm text-text-2">{t('list.description')}</p>
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <InputGroup className="max-w-90 min-w-48 flex-1 basis-60">
-          <InputGroupAddon>
-            <IconSearch />
-          </InputGroupAddon>
-          <InputGroupInput
-            aria-label={t('list.search')}
-            placeholder={t('list.search')}
-            value={searchText}
-            onChange={(event) => {
-              setSearchText(event.currentTarget.value);
-              writeQuery(event.currentTarget.value);
-            }}
-          />
-        </InputGroup>
-        <ToggleGroup
-          type="single"
-          aria-label={t('list.zoneFilter')}
-          value={zone ?? 'all'}
-          onValueChange={(value) => value && setFilters({ zone: isZone(value) ? value : null })}
-        >
-          <ToggleGroupItem value="all">{common('all')}</ToggleGroupItem>
-          {ZONES.map((item) => (
-            <ToggleGroupItem key={item} value={item}>
-              <ZoneDot zone={item} size={8} />
-              {e('zone', item)}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-        <TerritoryFilter
-          territoryId={territoryId}
-          districtId={districtId}
-          onChange={({ territory, district }) =>
-            setFilters({
-              territory: territory === null ? null : String(territory),
-              district: district === null ? null : String(district),
-            })
-          }
-        />
-        {hasFilters && (
-          <Button
-            variant="ghost"
-            onClick={() => {
-              writeQuery.cancel();
-              setParams(new URLSearchParams());
-            }}
+      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(17rem,21rem)]">
+        <section aria-label={t('list.workspace.register')} className="order-2 min-w-0 overflow-hidden rounded-xl border border-border bg-surface lg:order-1">
+          <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3 sm:px-5">
+            <h2 className="mb-0 text-lg font-semibold">{t('list.workspace.register')}</h2>
+            {query.data && <span className="text-sm tabular-nums text-text-2">{query.data.total}</span>}
+          </div>
+          {query.isError && !query.data ? (
+            <ErrorBlock error={query.error} onRetry={() => void query.refetch()} />
+          ) : (
+            <DataTable
+              columns={columns}
+              data={query.data?.items ?? []}
+              total={query.data?.total ?? 0}
+              pageIndex={pageIndex}
+              pageSize={PAGE_SIZE}
+              onPageChange={(next) => setParams((prev) => patchParams(prev, { page: next === 0 ? null : String(next + 1) }))}
+              onRowClick={(row) => void navigate(`/objects/${row.id}`)}
+              getRowId={(row) => String(row.id)}
+              loading={query.isPending}
+              fetching={query.isFetching && !query.isPending}
+              emptyText={<>{t('list.empty')}<br /><span className="text-text-2">{t('list.emptyHint')}</span></>}
+            />
+          )}
+        </section>
+
+        <aside className="order-1 flex min-w-0 flex-col gap-4 rounded-xl border border-border bg-surface p-4 lg:order-2" aria-label={t('list.workspace.filters')}>
+          <div>
+            <h2 className="mb-1 text-lg font-semibold">{t('list.workspace.filters')}</h2>
+            <p className="mb-0 text-sm leading-5 text-text-2">{t('list.description')}</p>
+          </div>
+          <InputGroup>
+            <InputGroupAddon><IconSearch /></InputGroupAddon>
+            <InputGroupInput
+              aria-label={t('list.search')}
+              placeholder={t('list.search')}
+              value={searchText}
+              onChange={(event) => {
+                setSearchText(event.currentTarget.value);
+                writeQuery(event.currentTarget.value);
+              }}
+            />
+          </InputGroup>
+          <ToggleGroup
+            type="single"
+            aria-label={t('list.zoneFilter')}
+            value={zone ?? 'all'}
+            onValueChange={(value) => value && setFilters({ zone: isZone(value) ? value : null })}
+            className="w-full flex-wrap justify-start"
           >
-            {common('reset')}
-          </Button>
-        )}
+            <ToggleGroupItem value="all">{common('all')}</ToggleGroupItem>
+            {ZONES.map((item) => (
+              <ToggleGroupItem key={item} value={item}>
+                <ZoneDot zone={item} size={8} />
+                {e('zone', item)}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+          <TerritoryFilter
+            territoryId={territoryId}
+            districtId={districtId}
+            onChange={({ territory, district }) =>
+              setFilters({
+                territory: territory === null ? null : String(territory),
+                district: district === null ? null : String(district),
+              })
+            }
+          />
+          {hasFilters && (
+            <Button
+              variant="secondary"
+              className="w-full"
+              onClick={() => {
+                writeQuery.cancel();
+                setParams(new URLSearchParams());
+              }}
+            >
+              {common('reset')}
+            </Button>
+          )}
+          <ZoneDisclaimer />
+        </aside>
       </div>
-      {query.isError && !query.data ? (
-        <ErrorBlock error={query.error} onRetry={() => void query.refetch()} />
-      ) : (
-        <DataTable
-          columns={columns}
-          data={query.data?.items ?? []}
-          total={query.data?.total ?? 0}
-          pageIndex={pageIndex}
-          pageSize={PAGE_SIZE}
-          onPageChange={(next) => setParams((prev) => patchParams(prev, { page: next === 0 ? null : String(next + 1) }))}
-          onRowClick={(row) => void navigate(`/objects/${row.id}`)}
-          getRowId={(row) => String(row.id)}
-          loading={query.isPending}
-          fetching={query.isFetching && !query.isPending}
-          emptyText={
-            <>
-              {t('list.empty')}
-              <br />
-              <span className="text-text-3">{t('list.emptyHint')}</span>
-            </>
-          }
-        />
-      )}
-      <ZoneDisclaimer className="mt-3.5" />
       {canEditRegistry && (
         <>
           <ObjectFormModal opened={createOpen} onClose={() => setCreateOpen(false)} />

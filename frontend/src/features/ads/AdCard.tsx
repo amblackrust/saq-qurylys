@@ -1,5 +1,3 @@
-import { useEffect, useRef } from 'react';
-import { useReducedMotion } from '@/lib/hooks';
 import { IconAlertTriangle, IconCheck, IconExternalLink, IconMapPin } from '@tabler/icons-react';
 import { Link } from 'react-router';
 import { useTranslation } from 'react-i18next';
@@ -23,9 +21,9 @@ import { PaymentSchemes } from './PaymentSchemes';
 import { PhraseHitList } from './PhraseHitList';
 import { isHttpUrl } from './url';
 
-const sectionClass = 'flex flex-col gap-2.5 border-t border-border pt-3';
+const sectionClass = 'flex flex-col gap-3 border-t border-border pt-4';
 const factClass = 'flex min-w-0 flex-col gap-1 text-sm';
-const labelClass = 'text-xs font-medium text-text-3';
+const labelClass = 'text-sm font-medium text-text-2';
 const chipsClass = 'flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5';
 
 const STATUS_TONE: Record<AdStatus, ChipTone> = {
@@ -36,7 +34,7 @@ const STATUS_TONE: Record<AdStatus, ChipTone> = {
 
 interface Props {
   ad: AdRow;
-  /** the publication opened through `?ad=`: scrolled into view and ringed */
+  /** the publication opened through `?ad=`: visually highlighted in the detail pane */
   highlighted?: boolean;
   /** the phrase hit the risk-factor evidence points to (`?hit=`) */
   focusHitId?: number | null;
@@ -51,33 +49,22 @@ export function AdCard({ ad, highlighted = false, focusHitId = null }: Props) {
   const detail = detailQuery.data;
   // Show what the list row already has until the detail arrives.
   const view: AdRow = detail ?? ad;
-  const ref = useRef<HTMLElement>(null);
-  const reducedMotion = useReducedMotion();
-  const detailLoaded = detail !== undefined;
-
-  // Scroll again once the detail is in: the card grows when hits and evidence appear.
-  useEffect(() => {
-    if (highlighted) {
-      ref.current?.scrollIntoView({ block: 'center', behavior: reducedMotion ? 'auto' : 'smooth' });
-    }
-  }, [highlighted, detailLoaded, reducedMotion]);
 
   const url = view.url ?? '';
 
   return (
     <article
-      ref={ref}
       id={`ad-${ad.id}`}
       className={cn(
-        'flex min-w-0 scroll-mt-[calc(var(--header-h)+16px)] flex-col gap-3 rounded border border-border bg-surface p-4 transition-shadow duration-(--dur)',
+        'flex min-w-0 scroll-mt-[calc(var(--header-h)+16px)] flex-col gap-4 rounded-xl border border-border bg-surface p-4 transition-shadow duration-(--dur) sm:p-5',
         highlighted && 'shadow-2 ring-2 ring-focus',
       )}
       aria-label={t('card.label', { id: ad.id })}
     >
-      <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+      <header className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5">
           {!(view.is_outdoor && view.platform === 'outdoor') && <Chip>{e('platform', view.platform)}</Chip>}
-          {view.author && <span className="text-sm font-bold [overflow-wrap:anywhere]">{view.author}</span>}
+          {view.author && <span className="text-base font-semibold [overflow-wrap:anywhere]">{view.author}</span>}
           {view.is_outdoor && (
             <Chip title={t('card.outdoorTitle')}>
               <IconMapPin aria-hidden />
@@ -102,7 +89,7 @@ export function AdCard({ ad, highlighted = false, focusHitId = null }: Props) {
         </div>
       </header>
 
-      <div className="flex flex-wrap gap-x-4.5 gap-y-0.5 text-sm text-text-2">
+      <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm text-text-2">
         <span>
           <span className="text-text-3">{t('card.publishedAt')}</span>{' '}
           <span className="tabular-nums">{f.dateTime(view.published_at)}</span>

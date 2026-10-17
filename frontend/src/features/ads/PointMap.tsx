@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
-import { MAP_CONTROLS_CLASS, MAP_STYLE_URL, recolorBasemap } from '@/features/map/mapStyle';
+import { MAP_CONTROLS_CLASS, mapStyleUrl, recolorBasemap } from '@/features/map/mapStyle';
 import { MapLibreMap, Marker, NavigationControl } from '@/lib/maplibre';
+import { useTheme } from '@/theme/ThemeProvider';
 import { useTranslation } from 'react-i18next';
 import { useTerritoryList } from '@/lib/territories';
 import { useAuth } from '@/auth/useAuth';
@@ -22,12 +23,15 @@ interface Props {
 
 export default function PointMap({ lat, lon, onPick, onUnavailable }: Props) {
   const { t } = useTranslation('ads');
+  const { resolvedTheme } = useTheme();
   const { user } = useAuth();
   const { territories } = useTerritoryList();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const markerRef = useRef<Marker | null>(null);
   const callbacksRef = useRef({ onPick, onUnavailable });
+  const themeRef = useRef(resolvedTheme);
+  const appliedThemeRef = useRef(resolvedTheme);
   const ownTerritory = territories.find((territory) => territory.id === user?.territory_id);
   // The map is created once; these describe its first view only.
   const initialViewRef = useRef({
@@ -40,6 +44,15 @@ export default function PointMap({ lat, lon, onPick, onUnavailable }: Props) {
   });
 
   useEffect(() => {
+    themeRef.current = resolvedTheme;
+    const map = mapRef.current;
+    if (map && appliedThemeRef.current !== resolvedTheme) {
+      appliedThemeRef.current = resolvedTheme;
+      map.setStyle(mapStyleUrl(resolvedTheme), { diff: false });
+    }
+  }, [resolvedTheme]);
+
+  useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
     const { center, point } = initialViewRef.current;
@@ -49,7 +62,7 @@ export default function PointMap({ lat, lon, onPick, onUnavailable }: Props) {
     try {
       map = new MapLibreMap({
         container,
-        style: MAP_STYLE_URL,
+        style: mapStyleUrl(themeRef.current),
         center: start ? [start.lon, start.lat] : COUNTRY_CENTER,
         zoom: point ? POINT_ZOOM : center ? TERRITORY_ZOOM : COUNTRY_ZOOM,
         attributionControl: { compact: true },
@@ -59,9 +72,10 @@ export default function PointMap({ lat, lon, onPick, onUnavailable }: Props) {
       return;
     }
     map.addControl(new NavigationControl({ showCompass: false }), 'top-right');
-    map.on('style.load', () => recolorBasemap(map));
+    map.on('style.load', () => recolorBasemap(map, themeRef.current));
     map.on('click', (event) => callbacksRef.current.onPick(event.lngLat.lat, event.lngLat.lng));
     mapRef.current = map;
+    appliedThemeRef.current = themeRef.current;
 
     return () => {
       markerRef.current?.remove();

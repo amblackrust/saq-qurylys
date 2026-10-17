@@ -3,7 +3,7 @@ import { Link } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import type { ObjectRow } from '@/api/types';
 import { Button } from '@/components/ui/button';
-import BorderGlow from '@/components/fx/BorderGlow';
+import { IconFocus2 } from '@tabler/icons-react';
 import { DemoBadge } from '@/components/DemoBadge';
 import { EmptyState } from '@/components/QueryState';
 import { ZoneBadge } from '@/components/Zone';
@@ -16,10 +16,12 @@ interface Props {
   rows: ObjectRow[];
   /** row under the pointer or focus; its marker is highlighted on the map */
   highlightedId: number | null;
+  selectedId: number | null;
   onHighlight: (id: number | null) => void;
+  onSelect: (id: number) => void;
 }
 
-export function ObjectList({ rows, highlightedId, onHighlight }: Props) {
+export function ObjectList({ rows, highlightedId, selectedId, onHighlight, onSelect }: Props) {
   const { t } = useTranslation('map');
   const keyStatus = useKeyStatusLabel();
   const [shown, setShown] = useState(STEP);
@@ -41,7 +43,7 @@ export function ObjectList({ rows, highlightedId, onHighlight }: Props) {
           const link = (
             <Link
               to={`/objects/${row.id}`}
-              className="flex flex-col gap-0.5 px-3 py-1.5 text-text no-underline outline-none transition-colors duration-(--dur) hover:bg-hover focus-visible:bg-hover focus-visible:ring-1 focus-visible:ring-focus focus-visible:ring-inset active:bg-pressed data-active:bg-hover"
+              className={`flex min-w-0 flex-1 flex-col gap-0.5 px-3 py-2.5 text-text no-underline outline-none transition-colors duration-(--dur) hover:bg-hover focus-visible:bg-hover focus-visible:ring-1 focus-visible:ring-focus focus-visible:ring-inset active:bg-pressed data-active:bg-hover ${row.zone === 'red' ? 'border-l-2 border-zone-red' : ''}`}
               data-active={highlightedId === row.id || undefined}
               onFocus={() => onHighlight(row.id)}
               onBlur={() => onHighlight(null)}
@@ -64,18 +66,22 @@ export function ObjectList({ rows, highlightedId, onHighlight }: Props) {
           return (
             <li
               key={row.id}
-              className="border-t border-border first:border-t-0"
+              className="flex items-stretch border-t border-border first:border-t-0"
               onMouseEnter={() => onHighlight(row.id)}
               onMouseLeave={() => onHighlight(null)}
             >
-              {row.zone === 'red' ? (
-                // Red-zone rows glow along the border near the pointer; at rest the border is calm.
-                <BorderGlow className="mx-1 my-0.5" borderRadius={4} glowColor="5 100 62" glowIntensity={0.7}>
-                  {link}
-                </BorderGlow>
-              ) : (
-                link
-              )}
+              {link}
+              <Button
+                className="my-auto mr-2"
+                variant={selectedId === row.id ? 'secondary' : 'ghost'}
+                size="icon-sm"
+                aria-label={t('list.inspect', { name: row.name })}
+                aria-pressed={selectedId === row.id}
+                title={t('list.inspect', { name: row.name })}
+                onClick={() => onSelect(row.id)}
+              >
+                <IconFocus2 />
+              </Button>
             </li>
           );
         })}

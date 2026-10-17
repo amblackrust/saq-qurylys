@@ -7,6 +7,7 @@ import {
   type AddLayerObject,
 } from '@/lib/maplibre';
 import { useTranslation } from 'react-i18next';
+import { useTheme } from '@/theme/ThemeProvider';
 import type { DistrictCollection, ObjectRow } from '@/api/types';
 import { ZONE_HEX } from '@/components/zoneColor';
 import type { LatLon } from '@/lib/geo';
@@ -16,14 +17,14 @@ import {
   FALLBACK_STYLE,
   KAZAKHSTAN_VIEW,
   MAP_CONTROLS_CLASS,
-  MAP_STYLE_URL,
+  mapStyleUrl,
   isWebGlAvailable,
   prefersReducedMotion,
   readToken,
   recolorBasemap,
 } from './mapStyle';
 
-// Frame and popup, restyled for the dark theme. MapLibre's own CSS is light and unlayered, so it beats Tailwind's
+// Frame and popup follow the active app theme. MapLibre's own CSS is light and unlayered, so it beats Tailwind's
 // layered utilities: the overrides of its classes need `!` (the controls are in MAP_CONTROLS_CLASS).
 const FRAME_CLASS = `relative h-[var(--map-h,320px)] overflow-hidden rounded-lg bg-surface-sunken shadow-1 ${MAP_CONTROLS_CLASS}`;
 const POPUP_CLASS = [
@@ -178,13 +179,18 @@ function MapCanvas({
   children,
 }: Props) {
   const { t } = useTranslation('map');
+  const { resolvedTheme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const hoveredIdRef = useRef<number | null>(null);
   const hasFittedRef = useRef(false);
+  const lastFitKeyRef = useRef<string | null>(null);
   /** colors the markers have on screen, for the fade between two states of the map */
   const drawnColorsRef = useRef(new Map<number, Rgba>());
   const latestRef = useRef({ onOpen, highlightedId });
+  const themeRef = useRef(resolvedTheme);
+  const appliedThemeRef = useRef(resolvedTheme);
+  const styleStateRef = useRef({ loaded: false, usingFallback: false });
   /** Incremented each time a style (re)loads: sources and layers must then be filled again. */
   const [styleVersion, setStyleVersion] = useState(0);
 
@@ -192,16 +198,28 @@ function MapCanvas({
     latestRef.current = { onOpen, highlightedId };
   });
 
+  useEffect(() => {
+    themeRef.current = resolvedTheme;
+    const map = mapRef.current;
+    if (map && appliedThemeRef.current !== resolvedTheme) {
+      appliedThemeRef.current = resolvedTheme;
+      if (styleStateRef.current.usingFallback) {
+        recolorBasemap(map, resolvedTheme);
+        return;
+      }
+      styleStateRef.current.loaded = false;
+      map.setStyle(mapStyleUrl(resolvedTheme), { diff: false });
+    }
+  }, [resolvedTheme]);
+
   // The map is created once per mount (and per language, for the control labels); data changes go through setData.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    let styleLoaded = false;
-    let usedFallbackStyle = false;
     const map = new MapLibreMap({
       container,
-      style: MAP_STYLE_URL,
+      style: mapStyleUrl(themeRef.current),
       center: KAZAKHSTAN_VIEW.center,
       zoom: KAZAKHSTAN_VIEW.zoom,
       attributionControl: { compact: true },
@@ -213,6 +231,8 @@ function MapCanvas({
       },
     });
     mapRef.current = map;
+    appliedThemeRef.current = themeRef.current;
+    styleStateRef.current = { loaded: false, usingFallback: false };
     hasFittedRef.current = false;
     map.addControl(new NavigationControl({ showCompass: false }), 'top-right');
 
@@ -225,15 +245,16 @@ function MapCanvas({
     });
 
     map.on('style.load', () => {
-      styleLoaded = true;
-      recolorBasemap(map);
+      styleStateRef.current.loaded = true;
+      recolorBasemap(map, themeRef.current);
       addObjectLayers(map);
       setStyleVersion((version) => version + 1);
     });
-    // The style request failed (offline, blocked host): switch to plain OSM tiles once.
+    // A remote style that fails before loading falls back to plain OSM tiles once per attempt.
     map.on('error', () => {
-      if (styleLoaded || usedFallbackStyle) return;
-      usedFallbackStyle = true;
+      const styleState = styleStateRef.current;
+      if (styleState.loaded || styleState.usingFallback) return;
+      styleState.usingFallback = true;
       map.setStyle(FALLBACK_STYLE, { diff: false });
     });
 
@@ -314,10 +335,13 @@ function MapCanvas({
   const [west, south, east, north] = bounds ?? [null, null, null, null];
   const centerLat = fallbackCenter?.lat ?? null;
   const centerLon = fallbackCenter?.lon ?? null;
+  const fitKey = `${west},${south},${east},${north},${centerLat},${centerLon},${bottomInset}`;
   // Refits only when the extent changes, so periodic refetches do not reset the user's pan and zoom.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || styleVersion === 0) return;
+    if (hasFittedRef.current && lastFitKeyRef.current === fitKey) return;
+    lastFitKeyRef.current = fitKey;
     const duration = hasFittedRef.current && !prefersReducedMotion() ? FIT_ANIMATION_MS : 0;
     hasFittedRef.current = true;
     if (west !== null && south !== null && east !== null && north !== null) {
@@ -333,7 +357,7 @@ function MapCanvas({
     } else {
       map.easeTo({ center: KAZAKHSTAN_VIEW.center, zoom: KAZAKHSTAN_VIEW.zoom, duration });
     }
-  }, [west, south, east, north, centerLat, centerLon, bottomInset, styleVersion]);
+  }, [fitKey, west, south, east, north, centerLat, centerLon, bottomInset, styleVersion]);
 
   return (
     <div className={FRAME_CLASS} role="region" aria-label={t('map.label')}>

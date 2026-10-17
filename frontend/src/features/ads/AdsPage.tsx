@@ -3,10 +3,12 @@ import { IconCamera, IconPlus, IconRss } from '@tabler/icons-react';
 import { Link, useSearchParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { useAd, useAds } from '@/api/hooks/ads';
+import type { AdRow } from '@/api/types';
 import { useAuth } from '@/auth/useAuth';
 import { PageHeader } from '@/components/PageHeader';
 import { EmptyState, ErrorBlock } from '@/components/QueryState';
 import { Button } from '@/components/ui/button';
+import { Chip } from '@/components/Chip';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { AdCard } from './AdCard';
@@ -15,6 +17,39 @@ import { AdsPager } from './AdsPager';
 import { CaptureModal } from './CaptureModal';
 import { ManualAdModal } from './ManualAdModal';
 import { PAGE_SIZE, parseAdStatus, parseDemo, parseId, parsePlatform } from './constants';
+import { useEnum } from '@/i18n/useEnum';
+import { useFormat } from '@/i18n/useFormat';
+
+function PublicationRow({ ad, selected, onSelect }: { ad: AdRow; selected: boolean; onSelect: () => void }) {
+  const { t } = useTranslation('ads');
+  const e = useEnum();
+  const f = useFormat();
+
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      aria-label={t('card.label', { id: ad.id })}
+      onClick={onSelect}
+      className={cn(
+        'flex min-h-24 w-full flex-col items-stretch gap-2 border-b border-border px-4 py-3 text-left text-text transition-colors hover:bg-hover focus-visible:relative focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-focus',
+        selected && 'bg-hover',
+      )}
+    >
+      <span className="flex min-w-0 items-center justify-between gap-3">
+        <span className="min-w-0 truncate text-base font-semibold">{ad.author || ad.url || t('card.label', { id: ad.id })}</span>
+        <Chip>{e('platform', ad.platform)}</Chip>
+      </span>
+      <span className="line-clamp-2 text-sm leading-5 text-text-2">{ad.text || t('card.noText')}</span>
+      <span className="flex items-center justify-between gap-3 text-sm text-text-2">
+        <span>{ad.published_at ? f.dateTime(ad.published_at) : f.dateTime(ad.captured_at)}</span>
+        <Chip tone={ad.status === 'verification' ? 'yellow' : ad.status === 'captured' ? 'green' : 'neutral'}>
+          {e('ad_status', ad.status)}
+        </Chip>
+      </span>
+    </button>
+  );
+}
 
 function FeedSkeleton({ count = 3 }: { count?: number }) {
   const { t } = useTranslation();
@@ -61,14 +96,10 @@ export function AdsPage() {
     limit: PAGE_SIZE,
     offset: (page - 1) * PAGE_SIZE,
   });
-  // Shares its cache entry with the card of the same publication.
-  const pinnedAd = useAd(adId);
-
   const items = ads.data?.items ?? [];
   const total = ads.data?.total ?? 0;
-  // The opened publication is pinned above the feed (and left out of it): cards above it in the feed grow as
-  // their details load, which would push it out of view after the scroll.
-  const showPinned = adId !== null;
+  const selectedAdId = adId ?? items[0]?.id ?? null;
+  const selectedAd = useAd(selectedAdId);
   const canReset = params.size > 0;
 
   const updateParams = (patch: Record<string, string | null>) =>
@@ -124,7 +155,6 @@ export function AdsPage() {
           )
         }
       />
-      <p className="mb-4 max-w-4xl text-sm leading-5 text-text-2">{t('feed.workflowHint')}</p>
       <AdFilters
         values={filters}
         onChange={changeFilters}
@@ -132,28 +162,15 @@ export function AdsPage() {
         canReset={canReset}
       />
 
-      {showPinned && (
-        <section className="mb-5" aria-label={t('feed.pinned')}>
-          <div className="mb-2 flex items-center justify-between gap-3 text-sm">
-            <span className="text-2xs font-bold tracking-wider text-text-3 uppercase">{t('feed.pinned')}</span>
-            <Button variant="ghost" size="xs" onClick={() => updateParams({ ad: null, hit: null })}>
-              {t('feed.unpin')}
-            </Button>
+      <div className="mt-5 grid items-start gap-5 lg:grid-cols-[minmax(18rem,0.72fr)_minmax(0,1.28fr)]">
+        <section ref={feedRef} aria-labelledby="ads-results-title" className="order-2 min-w-0 overflow-hidden rounded-xl border border-border bg-surface lg:order-1" aria-busy={ads.isFetching}>
+          <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+            <h2 id="ads-results-title" className="mb-0 text-lg font-semibold">{t('feed.results')}</h2>
+            {ads.data && <span className="text-sm tabular-nums text-text-2">{total}</span>}
           </div>
-          {pinnedAd.isPending && <FeedSkeleton count={1} />}
-          {pinnedAd.isError && <ErrorBlock error={pinnedAd.error} onRetry={() => void pinnedAd.refetch()} />}
-          {pinnedAd.data && <AdCard ad={pinnedAd.data} highlighted focusHitId={focusHitId} />}
-        </section>
-      )}
-
-      <div
-        ref={feedRef}
-        className={cn('flex flex-col gap-3.5 transition-opacity duration-(--dur)', ads.isPlaceholderData && 'opacity-60')}
-        aria-busy={ads.isFetching}
-      >
-        {ads.isPending && <FeedSkeleton />}
-        {ads.isError && <ErrorBlock error={ads.error} onRetry={() => void ads.refetch()} />}
-        {ads.data && items.length === 0 && (
+          {ads.isPending && <FeedSkeleton />}
+          {ads.isError && <ErrorBlock error={ads.error} onRetry={() => void ads.refetch()} />}
+          {ads.data && items.length === 0 && (
           <EmptyState
             action={
               total > 0 ? (
@@ -184,12 +201,31 @@ export function AdsPage() {
               </>
             )}
           </EmptyState>
-        )}
-        {items
-          .filter((ad) => ad.id !== adId)
-          .map((ad) => (
-            <AdCard key={ad.id} ad={ad} />
+          )}
+          {items.map((ad) => (
+            <PublicationRow key={ad.id} ad={ad} selected={ad.id === selectedAdId} onSelect={() => showAd(ad.id)} />
           ))}
+        </section>
+
+        <section aria-label={t('feed.pinned')} className="order-1 min-w-0 lg:sticky lg:top-[calc(var(--header-h)+16px)] lg:order-2">
+          {selectedAdId !== null && (
+            <div className="mb-2 flex min-h-10 items-center justify-between gap-3 border-b border-border pb-2">
+              <h2 className="mb-0 text-lg font-semibold">{t('feed.pinned')}</h2>
+              {adId !== null && (
+                <Button variant="ghost" size="xs" onClick={() => updateParams({ ad: null, hit: null })}>
+                  {t('feed.unpin')}
+                </Button>
+              )}
+            </div>
+          )}
+          {selectedAdId === null && ads.isPending && <FeedSkeleton count={1} />}
+          {selectedAdId === null && ads.data && items.length === 0 && <EmptyState>{t('feed.empty')}</EmptyState>}
+          {selectedAdId !== null && selectedAd.isPending && <FeedSkeleton count={1} />}
+          {selectedAd.isError && <ErrorBlock error={selectedAd.error} onRetry={() => void selectedAd.refetch()} />}
+          {selectedAd.data && (
+            <AdCard key={selectedAd.data.id} ad={selectedAd.data} highlighted={adId !== null} focusHitId={focusHitId} />
+          )}
+        </section>
       </div>
 
       {items.length > 0 && <AdsPager page={page} total={total} onPageChange={changePage} />}

@@ -31,7 +31,7 @@ export function ObjectHeader({ object }: { object: ObjectDetail }) {
 
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="min-w-0">
-          <p className="mb-1 font-mono text-xs tracking-wide text-text-3">{object.code}</p>
+          <p className="mb-1.5 font-mono text-sm font-medium tracking-wide text-text-2">{object.code}</p>
           <h1 className="text-2xl font-bold [overflow-wrap:anywhere]">{object.name}</h1>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -59,13 +59,13 @@ export function ObjectHeader({ object }: { object: ObjectDetail }) {
         <ZoneBadge zone={object.zone} score={object.score} size="md" />
         {object.key_status && <Chip>{keyStatusLabel(object.key_status, object.key_status_detail)}</Chip>}
         {object.is_demo && <DemoBadge />}
-        <span className="text-sm text-text-3">
+        <span className="text-sm text-text-2">
           {object.last_scored_at
             ? t('card.header.lastScored', { value: dateTime(object.last_scored_at) })
             : t('card.header.notScored')}
         </span>
         {object.next_check_at && (
-          <span className="text-sm text-text-3">{t('card.header.nextCheck', { value: dateTime(object.next_check_at) })}</span>
+          <span className="text-sm text-text-2">{t('card.header.nextCheck', { value: dateTime(object.next_check_at) })}</span>
         )}
       </div>
 
