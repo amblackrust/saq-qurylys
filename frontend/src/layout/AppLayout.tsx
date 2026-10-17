@@ -113,9 +113,9 @@ export function AppLayout() {
   const sidebar = (onNavigate?: () => void) => (
     <>
       <Link to="/" aria-label={t('appName')} onClick={onNavigate} className="flex h-16 items-center gap-3 px-4 text-text no-underline">
-        <span className="grid size-10 place-items-center rounded-xl bg-primary text-base font-bold text-primary-foreground">S</span>
+        <img src="/ayqyn-mark.svg" alt="" aria-hidden="true" className="size-10 shrink-0" />
         <span className="flex flex-col leading-tight">
-          <span className="text-[15px] font-semibold tracking-tight">SAQ QURYLYS</span>
+          <span className="text-[15px] font-semibold tracking-tight">AYQYN</span>
           <span className="mt-1 text-[13px] text-text-3">{t('nav.workspace')}</span>
         </span>
       </Link>

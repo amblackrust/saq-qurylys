@@ -892,7 +892,7 @@ test('light and dark appearance persists; the sidebar and mobile drawer fit supp
   await expect.poll(() => page.locator('body').evaluate((body) => getComputedStyle(body).overflow)).not.toBe('hidden');
   await page.setViewportSize({ width: 390, height: 844 });
   await menuButton.click();
-  await drawer.getByRole('navigation').getByRole('link', { name: 'Задачи' }).click();
+  await drawer.getByRole('navigation').getByRole('link', { name: 'Рабочий стол' }).click();
   await expect(page).toHaveURL(/\/work$/);
   await expect(drawer).toBeHidden();
 
@@ -938,10 +938,60 @@ test('light and dark appearance persists; the sidebar and mobile drawer fit supp
     const loginPage = await loginContext.newPage();
     await loginPage.goto(new URL('/login', page.url()).toString());
     await expect(loginPage.getByRole('heading', { name: 'Вход в систему' })).toBeVisible();
-    await screenshot(loginPage, 'login-light-1440');
-    await loginPage.emulateMedia({ colorScheme: 'dark' });
-    await expect(loginPage.locator('html')).toHaveAttribute('data-theme', 'dark');
-    await screenshot(loginPage, 'login-dark-1440');
+    await expect(loginPage).toHaveTitle('AYQYN');
+    await expect(loginPage.getByText('AYQYN', { exact: true })).toBeVisible();
+    const faviconHref = await loginPage.locator('link[rel="icon"]').getAttribute('href');
+    expect(faviconHref).toBe('/ayqyn-mark.svg');
+    const faviconResponse = await loginPage.request.get(new URL(faviconHref!, loginPage.url()).toString());
+    expect(faviconResponse.status()).toBe(200);
+    expect(faviconResponse.headers()['content-type']).toContain('image/svg+xml');
+
+    for (const { width, height } of [
+      { width: 320, height: 600 },
+      { width: 320, height: 844 },
+      { width: 390, height: 844 },
+      { width: 1440, height: 900 },
+    ]) {
+      await loginPage.setViewportSize({ width, height });
+      const appearanceButton = loginPage.getByRole('button', { name: /Оформление/ });
+      const languageGroup = loginPage.getByRole('radiogroup', { name: 'Язык' });
+      for (const theme of ['Светлая', 'Тёмная'] as const) {
+        await appearanceButton.click();
+        await loginPage.getByRole('menuitemradio', { name: theme }).click();
+        await expect(loginPage.locator('html')).toHaveAttribute('data-theme', theme === 'Тёмная' ? 'dark' : 'light');
+
+        const appearanceBox = await appearanceButton.boundingBox();
+        const languageBox = await languageGroup.boundingBox();
+        const brandBox = await loginPage.locator('img[src="/ayqyn-mark.svg"]').boundingBox();
+        expect(appearanceBox, `appearance control must be visible at ${width}px in ${theme} mode`).not.toBeNull();
+        expect(languageBox, `language control must be visible at ${width}px in ${theme} mode`).not.toBeNull();
+        expect(brandBox, `brand mark must be visible at ${width}px in ${theme} mode`).not.toBeNull();
+        expect(appearanceBox!.x).toBeGreaterThanOrEqual(0);
+        expect(appearanceBox!.x + appearanceBox!.width).toBeLessThanOrEqual(width);
+        expect(appearanceBox!.y).toBeGreaterThanOrEqual(0);
+        expect(languageBox!.x).toBeGreaterThanOrEqual(0);
+        expect(languageBox!.x + languageBox!.width).toBeLessThanOrEqual(width);
+        expect(languageBox!.y + languageBox!.height).toBeLessThanOrEqual(height);
+        const separated = appearanceBox!.x + appearanceBox!.width <= languageBox!.x
+          || languageBox!.x + languageBox!.width <= appearanceBox!.x
+          || appearanceBox!.y + appearanceBox!.height <= languageBox!.y
+          || languageBox!.y + languageBox!.height <= appearanceBox!.y;
+        expect(separated, `appearance and language controls must not overlap at ${width}px in ${theme} mode`).toBe(true);
+        if (width <= 390) {
+          expect(appearanceBox!.y + appearanceBox!.height).toBeLessThanOrEqual(brandBox!.y);
+          expect(languageBox!.y + languageBox!.height).toBeLessThanOrEqual(brandBox!.y);
+        }
+        for (const languageTarget of await languageGroup.getByRole('radio').all()) {
+          const box = await languageTarget.boundingBox();
+          expect(box).not.toBeNull();
+          expect(box!.width).toBeGreaterThanOrEqual(44);
+          expect(box!.height).toBeGreaterThanOrEqual(44);
+          expect(box!.x).toBeGreaterThanOrEqual(0);
+          expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+        }
+        await screenshot(loginPage, `login-${theme === 'Тёмная' ? 'dark' : 'light'}-${width}-${height}`);
+      }
+    }
   } finally {
     await loginContext.close();
   }

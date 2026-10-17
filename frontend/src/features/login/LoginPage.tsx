@@ -48,15 +48,15 @@ export function LoginPage() {
   });
 
   return (
-    <div className="relative grid min-h-dvh place-items-center bg-bg px-(--gutter) py-24">
-      <div className="absolute top-4 right-(--gutter) flex items-center gap-2">
-        <div className="w-48 max-sm:w-44"><AppearanceMenu /></div>
-        <LanguageSwitch />
+    <div className="relative grid min-h-dvh place-items-center bg-bg px-(--gutter) py-24 max-sm:pt-36">
+      <div className="absolute top-4 right-(--gutter) flex flex-col items-end gap-2 sm:flex-row sm:items-center">
+        <div className="w-56 shrink-0"><AppearanceMenu /></div>
+        <div className="shrink-0"><LanguageSwitch /></div>
       </div>
       <div className="flex w-full max-w-[480px] flex-col items-center gap-6">
         <div className="flex items-center gap-3 text-text">
-          <span className="grid size-12 place-items-center rounded-2xl bg-primary text-lg font-bold text-primary-foreground">S</span>
-          <span className="text-xl font-semibold tracking-tight">SAQ QURYLYS</span>
+          <img src="/ayqyn-mark.svg" alt="" aria-hidden="true" className="size-12 shrink-0" />
+          <span className="text-xl font-semibold tracking-tight">AYQYN</span>
         </div>
         <form
           className="w-full overflow-hidden rounded-2xl border border-border bg-surface shadow-2"

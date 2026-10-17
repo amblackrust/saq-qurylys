@@ -9,7 +9,7 @@ DEMO_WATERMARK = "ДЕМОНСТРАЦИОННЫЕ ДАННЫЕ"
 
 RU: dict[str, Any] = {
     "lang": "ru",
-    "product": "SAQ QURYLYS",
+    "product": "AYQYN",
     "title": "Сигнальная карточка",
     "disclaimer": RED_ZONE_DISCLAIMER,
     "demo": DEMO_WATERMARK,
