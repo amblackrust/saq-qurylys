@@ -1,9 +1,9 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { expect, test } from '../support/test';
 import type { Page, Route } from '@playwright/test';
-import type { ActivityEvent, AdDetail, EvidenceMeta, ObjectDetail, ObjectDocument, Role, SignalDetail, SignalRecipient, SignalStatus, User } from '../../src/api/types';
+import type { ActivityEvent, AdDetail, EvidenceMeta, LinkGraph, ObjectDetail, ObjectDocument, Role, SignalDetail, SignalRecipient, SignalStatus, User, VisionAsset, VisionFinding, VisionFrame, VisionSessionDetail } from '../../src/api/types';
 
-const screenshotDir = '/tmp/saq-ui-after';
+const screenshotDir = '/tmp/saq-macos-ui';
 const objectRow = {
   id: 7,
   code: 'D-07',
@@ -24,7 +24,41 @@ const dashboard = {
   last_updated_at: '2026-10-15T10:00:00Z',
   objects: [
     { ...objectRow, id: 9, code: 'D-09', name: 'ЖК Радужный парк', score: 72, zone: 'red' as const },
+    { ...objectRow, id: 7, code: 'D-07', name: 'ЖК Северный бриз', score: 42, zone: 'yellow' as const },
   ],
+};
+const settingsFixture = {
+  review_days: 10,
+  ad_window_days: 90,
+  readiness_gap_pp: 20,
+  significant_delay_days: 90,
+  zone_yellow_min: 25,
+  zone_red_min: 60,
+  complaints_threshold: 3,
+  stalled_days: 180,
+  recheck_after_days: 90,
+  link_confidence_threshold: 0.7,
+  green_interval_days: 90,
+  yellow_interval_days: 30,
+  recipient_emails: { mio: [], gask: [], law_enforcement: [] },
+};
+
+const graphFixture: LinkGraph = {
+  nodes: [
+    { id: 'developer:3', type: 'developer', label: 'ТОО Северстрой', ref_id: 3, zone: null, is_demo: false, platform: null },
+    { id: 'object:7', type: 'object', label: 'ЖК Северный бриз', ref_id: 7, zone: 'yellow', is_demo: false, platform: null },
+    { id: 'phone:+77001234567', type: 'phone', label: '+77001234567', ref_id: null, zone: null, is_demo: null, platform: null },
+    { id: 'developer:4', type: 'developer', label: 'ТОО Учебный застройщик', ref_id: 4, zone: null, is_demo: false, platform: null },
+    { id: 'object:8', type: 'object', label: 'ЖК Малахит', ref_id: 8, zone: 'green', is_demo: false, platform: null },
+  ],
+  edges: [
+    { source: 'developer:3', target: 'object:7', type: 'developer_object' },
+    { source: 'object:7', target: 'phone:+77001234567', type: 'owner_phone' },
+    { source: 'phone:+77001234567', target: 'developer:4', type: 'owner_phone' },
+    { source: 'developer:4', target: 'object:8', type: 'developer_object' },
+  ],
+  findings: [{ kind: 'shared_phone', value: '+77001234567', label: 'Общий телефон', developer_ids: [3, 4], object_ids: [7, 8] }],
+  truncated: false,
 };
 
 function makeUser(role: Role): User {
@@ -288,6 +322,7 @@ interface CapturedMutation {
 
 interface MockState {
   role: Role;
+  graph?: LinkGraph;
   signals: SignalDetail[];
   activityEvents?: ActivityEvent[];
   evidenceContents?: Record<number, { contentType: string; body: string | Buffer }>;
@@ -304,6 +339,7 @@ interface MockState {
   assistantReplies?: string[];
   /** `/assistant/chat` never answers, so the Stop button can be tested */
   assistantHangs?: boolean;
+  sourceWatched?: boolean;
 }
 
 const sse = (events: object[]) => events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('');
@@ -335,6 +371,7 @@ async function json(route: Route, body: unknown, status = 200) {
 async function installMocks(page: Page, role: Role, overrides: Partial<MockState> = {}): Promise<Harness> {
   const state: MockState = {
     role,
+    sourceWatched: true,
     signals: [],
     expectedEvidence503Responses: 0,
     signal: makeSignal(),
@@ -385,21 +422,7 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
       return json(route, { items: state.activityEvents ?? [], cursor: 'mock-cursor', reset: false });
     }
     if (method === 'GET' && path === '/settings') {
-      return json(route, {
-        review_days: 10,
-        ad_window_days: 90,
-        readiness_gap_pp: 20,
-        significant_delay_days: 90,
-        zone_yellow_min: 25,
-        zone_red_min: 60,
-        complaints_threshold: 3,
-        stalled_days: 180,
-        recheck_after_days: 90,
-        link_confidence_threshold: 0.7,
-        green_interval_days: 90,
-        yellow_interval_days: 30,
-        recipient_emails: { mio: [], gask: [], law_enforcement: [] },
-      });
+      return json(route, settingsFixture);
     }
     if (method === 'GET' && path === '/assistant/config') {
       return state.assistantEnabled === false
@@ -423,6 +446,8 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
     }
     if (method === 'GET' && path === '/territories') return json(route, []);
     if (method === 'GET' && path === '/dashboard') return json(route, dashboard);
+    if (method === 'GET' && path === '/graph') return json(route, state.graph ?? graphFixture);
+    if (method === 'GET' && path === '/source-suggestions') return json(route, []);
     if (method === 'GET' && path === '/signals') {
       harness.listRequests.push(url);
       if ((state.failReturnedCount ?? 0) > 0 && url.searchParams.get('status') === 'returned') {
@@ -463,7 +488,10 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
     if (method === 'GET' && path === '/ads') {
       return json(route, { items: state.ads, total: state.ads.length });
     }
-    if (method === 'GET' && /^\/ads\/\d+$/.test(path)) return json(route, state.ad);
+    if (method === 'GET' && /^\/ads\/\d+$/.test(path)) {
+      const id = Number(path.split('/').at(-1));
+      return json(route, state.ads.find((ad) => ad.id === id) ?? state.ad);
+    }
     if (method === 'GET' && path === '/source-accounts') {
       return json(route, {
         items: [{
@@ -474,7 +502,7 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
           object_id: 7,
           developer_id: null,
           territory_id: null,
-          is_watched: true,
+          is_watched: state.sourceWatched ?? true,
           last_collected_at: null,
           last_error: null,
           last_error_at: null,
@@ -488,9 +516,25 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
         { platform: 'aggregator', enabled: false, sources: { olx: false, krisha: false } },
       ]);
     }
+    if (method === 'PATCH' && path === '/source-accounts/3') {
+      state.sourceWatched = Boolean((body as { is_watched?: boolean }).is_watched);
+      return json(route, {
+        id: 3,
+        platform: 'aggregator',
+        handle: 'ЖК Северный бриз · объявления OLX',
+        url: 'https://www.olx.kz/search-example',
+        object_id: 7,
+        developer_id: null,
+        territory_id: null,
+        is_watched: state.sourceWatched,
+        last_collected_at: null,
+        last_error: null,
+        last_error_at: null,
+      });
+    }
 
-    if (method === 'POST' && path === '/ads/11/accept-llm') return json(route, state.ad);
-    if (method === 'PATCH' && path === '/ads/11') {
+    if (method === 'POST' && /^\/ads\/\d+\/accept-llm$/.test(path)) return json(route, state.ads.find((ad) => ad.id === Number(path.split('/')[2])) ?? state.ad);
+    if (method === 'PATCH' && /^\/ads\/\d+$/.test(path)) {
       state.ad = { ...state.ad, ...(body as Partial<AdDetail>) };
       return json(route, state.ad);
     }
@@ -519,6 +563,7 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
       state.signal.number = 'SIG-2026-0088';
       return json(route, state.signal, 201);
     }
+    if (method === 'PUT' && path === '/settings') return json(route, { ...settingsFixture, ...(body as Partial<typeof settingsFixture>) });
 
     const descriptor = `${method} ${path}${url.search}`;
     harness.unexpected.push(descriptor);
@@ -564,14 +609,14 @@ test('work opens as the operator task queue, links the real next item and suppor
 
   await page.goto('/');
   await expect(page).toHaveURL(/\/work$/);
-  await expect(page.getByRole('heading', { level: 1, name: 'Задачи' })).toBeVisible();
+  await expect(page.getByRole('main').getByRole('heading', { level: 1, name: 'Задачи' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Доработать карточку SIG-2026-0043' })).toHaveAttribute('href', '/signals/43');
-  await expect(page.getByRole('heading', { name: 'Путь работы' })).toBeVisible();
-  await screenshot(page, 'work-mio-ru');
+  await expect(page.getByRole('heading', { name: 'Что требует внимания' })).toBeVisible();
+  await screenshot(page, 'work-light-1440');
 
   await page.getByText('ҚАЗ', { exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'kk');
-  await expect(page.getByRole('heading', { level: 1, name: 'Тапсырмалар' })).toBeVisible();
+  await expect(page.getByRole('main').getByRole('heading', { level: 1, name: 'Тапсырмалар' })).toBeVisible();
   await screenshot(page, 'work-mio-kk');
   expect(harness.mutations).toEqual([]);
   expectCleanBrowser(harness);
@@ -606,237 +651,364 @@ test('administrator opens the read-only task overview and recipient is kept out 
   expectCleanBrowser(recipientHarness);
 });
 
-test('header restores the compact style and keeps utilities usable at every supported width', async ({ page }) => {
+test('administrator edits a setting and submits only the changed value', async ({ page }) => {
+  const harness = await installMocks(page, 'admin');
+  await page.goto('/admin/settings');
+  await expect(page.getByRole('heading', { name: 'Настройки системы' })).toBeVisible();
+  const field = page.locator('#setting-review_days');
+  await field.fill('11');
+  await page.getByRole('button', { name: 'Сохранить' }).click();
+  await expect.poll(() => harness.mutations.filter(({ method, path }) => method === 'PUT' && path === '/settings')).toHaveLength(1);
+  expect(harness.mutations.find(({ method, path }) => method === 'PUT' && path === '/settings')?.body).toEqual({ review_days: 11 });
+  expectCleanBrowser(harness);
+});
+
+test('Vision creates a fixture session and uploads a supported photo through the real UI actions', async ({ page }) => {
+  const mutations: Array<{ method: string; path: string; body: string | null }> = [];
+  const finding: VisionFinding = {
+    id: 81, session_id: 41, frame_id: 71, bbox: { x: 0.2, y: 0.2, w: 0.3, h: 0.3 }, category: 'outdoor_ad', status: 'observed',
+    origin: 'model', confidence: 0.78, model_version: 'fixture-model', note: 'Fixture finding', review_state: 'pending', ocr_status: null,
+    ocr_text: null, ocr_confidence: null, ocr_engine: null, confirmed_text: null, run_id: 91, ad_post_id: null,
+    created_at: '2026-10-16T10:01:00Z', created_by_name: null, reviews: [],
+  };
+  const asset: VisionAsset = {
+    id: 51, session_id: 41, kind: 'photo', original_name: 'inspection.png', content_type: 'image/png', size_bytes: 68, sha256: 'f'.repeat(64),
+    width: 1, height: 1, duration_ms: null, lat: null, lon: null, taken_at: null, status: 'ready', error_code: null, progress: 100,
+    frames_count: 1, created_at: '2026-10-16T10:01:00Z',
+  };
+  const frame: VisionFrame = { id: 71, asset_id: 51, timestamp_ms: null, width: 1, height: 1, sharpness: 1, usable: true };
+  let session: VisionSessionDetail = {
+    id: 41,
+    object: null,
+    territory_id: 1,
+    source: 'drone',
+    captured_at: null,
+    status: 'open',
+    is_demo: false,
+    note: null,
+    created_at: '2026-10-16T10:00:00Z',
+    created_by_name: 'Сотрудник МИО',
+    reviewed_at: null,
+    reviewed_by_name: null,
+    assets_count: 0,
+    frames_count: 0,
+    findings_count: 0,
+    processing: false,
+    failed: false,
+    assets: [],
+    findings: [],
+    runs: [],
+  };
+  await page.addInitScript(() => {
+    localStorage.setItem('saq_token', 'mock-vision-fixture');
+    localStorage.setItem('saq_lang', 'ru');
+  });
+  await page.route('**/api/v1/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const path = url.pathname.replace(/^\/api\/v1/, '');
+    const method = request.method();
+    if (method !== 'GET') mutations.push({ method, path, body: request.postData() });
+    if (method === 'GET' && path === '/auth/me') return json(route, makeUser('mio_officer'));
+    if (method === 'GET' && path === '/assistant/config') return json(route, { enabled: false });
+    if (method === 'GET' && path === '/vision/config') return json(route, { enabled: true, detector_mode: 'experimental_pretrained', detector_model: 'fixture-only', ocr_enabled: false, max_photo_mb: 20, max_video_mb: 200, max_duration_seconds: 600 });
+    if (method === 'GET' && path === '/vision/sessions') return json(route, { items: [session], total: 1 });
+    if (method === 'POST' && path === '/vision/sessions') return json(route, session, 201);
+    if (method === 'GET' && path === '/vision/sessions/41') return json(route, session);
+    if (method === 'GET' && path === '/vision/sessions/41/frames') return json(route, { items: session.assets_count > 0 ? [frame] : [], total: session.assets_count > 0 ? 1 : 0 });
+    if (method === 'POST' && path === '/vision/sessions/41/assets') {
+      session = { ...session, assets: [asset], assets_count: 1, frames_count: 1, findings: [finding], findings_count: 1 };
+      return json(route, asset, 201);
+    }
+    if (method === 'GET' && path === '/vision/frames/71/content') return route.fulfill({ status: 200, contentType: 'image/png', body: transparentPng });
+    if (method === 'POST' && path === '/vision/findings/81/review') {
+      finding.review_state = 'confirmed';
+      return json(route, finding);
+    }
+    if (method === 'POST' && path === '/vision/findings/81/publish-ad') return json(route, { ad_id: 99 }, 201);
+    if (method === 'GET' && ['/notifications', '/territories'].includes(path)) return json(route, path === '/notifications' ? { items: [] } : []);
+    if (method === 'GET' && path === '/activity') return json(route, { items: [], cursor: null, reset: false });
+    if (method === 'GET' && path === '/settings') return json(route, { review_days: 10, ad_window_days: 90, readiness_gap_pp: 20, significant_delay_days: 90, zone_yellow_min: 25, zone_red_min: 60, complaints_threshold: 3, stalled_days: 180, recheck_after_days: 90, link_confidence_threshold: 0.7, green_interval_days: 90, yellow_interval_days: 30, recipient_emails: { mio: [], gask: [], law_enforcement: [] } });
+    return json(route, { detail: `No Vision fixture for ${method} ${path}` }, 404);
+  });
+
+  await page.goto('/vision');
+  await expect(page.getByRole('heading', { name: 'Визуальные инспекции' })).toBeVisible();
+  await page.getByRole('button', { name: 'Новая инспекция' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Новая инспекция' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Создать' }).click();
+  await expect(page).toHaveURL(/\/vision\/41$/);
+  expect(mutations.filter(({ method, path }) => method === 'POST' && path === '/vision/sessions')).toHaveLength(1);
+  await page.getByTestId('vision-file-input').setInputFiles({ name: 'inspection.png', mimeType: 'image/png', buffer: transparentPng });
+  await expect(page.getByText('inspection.png 1 KB', { exact: true })).toBeVisible();
+  await expect(page.getByText('Загружен')).toBeVisible();
+  expect(mutations.filter(({ method, path }) => method === 'POST' && path === '/vision/sessions/41/assets')).toHaveLength(1);
+
+  const findingCard = page.getByRole('article', { name: 'Находка №81' });
+  await expect(findingCard).toBeVisible();
+  await findingCard.getByRole('button', { name: 'Показать на кадре' }).click();
+  const viewer = page.getByRole('dialog', { name: /Кадр/ });
+  await expect(viewer).toBeVisible();
+  await expect(viewer.getByRole('button', { name: 'Выделить область' })).toBeEnabled();
+  await page.keyboard.press('Escape');
+  await expect(viewer).toBeHidden();
+
+  await findingCard.getByRole('button', { name: 'Подтвердить', exact: true }).click();
+  await expect(findingCard.getByText('Подтверждено специалистом', { exact: true })).toBeVisible();
+  await findingCard.getByRole('textbox', { name: 'Текст рекламы' }).fill('Наружная реклама по fixture');
+  await findingCard.getByRole('button', { name: 'Создать наружную рекламу' }).click();
+  const reviewMutation = mutations.find(({ path }) => path === '/vision/findings/81/review');
+  expect(reviewMutation && JSON.parse(reviewMutation.body ?? '{}')).toMatchObject({ action: 'confirm' });
+  const publishMutation = mutations.find(({ path }) => path === '/vision/findings/81/publish-ad');
+  expect(publishMutation && JSON.parse(publishMutation.body ?? '{}')).toMatchObject({ text: 'Наружная реклама по fixture', object_id: null });
+});
+
+test('light and dark appearance persists; the sidebar and mobile drawer fit supported widths', async ({ page }) => {
   const harness = await installMocks(page, 'mio_officer');
   await page.goto('/work');
   const header = page.getByRole('banner');
   const utilities = page.getByRole('group', { name: 'Действия и настройки' });
-  const typography = await page.evaluate(() => {
-    const headerElement = document.querySelector('header');
-    const navigation = headerElement?.querySelector('nav');
-    const activeLink = navigation?.querySelector<HTMLAnchorElement>('a[aria-current="page"]');
-    if (!activeLink) throw new Error('Missing active navigation link');
-    const navStyle = getComputedStyle(activeLink);
-    return {
-      bodyFontSize: getComputedStyle(document.body).fontSize,
-      navFontFamily: navStyle.fontFamily,
-      navTextTransform: navStyle.textTransform,
-      navTextShadow: navStyle.textShadow,
-    };
-  });
-  expect(typography.bodyFontSize).toBe('14px');
-  expect(typography.navFontFamily.toLowerCase()).toContain('tektur variable');
-  expect(typography.navTextTransform).toBe('uppercase');
-  expect(typography.navTextShadow).not.toBe('none');
+  const appearance = page.getByRole('button', { name: /Оформление/ });
+  const bodyFontSize = await page.evaluate(() => getComputedStyle(document.body).fontSize);
+  expect(bodyFontSize).toBe('16px');
 
-  const breakpoints = [320, 390, 768, 1024, 1440];
-  const measurements: Array<{
-    width: number;
-    headerHeight: number;
-    clientWidth: number;
-    scrollWidth: number;
-    mobileNavLabels: Array<{ cell: number; label: string; left: number; right: number; cellLeft: number; cellRight: number }>;
-  }> = [];
-  const popoverMeasurements: Array<{ width: number; x: number; y: number; right: number; bottom: number }> = [];
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const notificationButton = header.getByRole('button', { name: 'Уведомления' });
+  await notificationButton.focus();
+  await page.keyboard.press('Enter');
+  const notificationPanel = page.getByRole('dialog');
+  await expect(notificationPanel).toBeVisible();
+  const notificationBox = await notificationPanel.boundingBox();
+  expect(notificationBox).not.toBeNull();
+  expect(notificationBox!.x).toBeGreaterThanOrEqual(0);
+  expect(notificationBox!.x + notificationBox!.width).toBeLessThanOrEqual(1440);
+  expect(notificationBox!.y + notificationBox!.height).toBeLessThanOrEqual(900);
+  await page.keyboard.press('Escape');
+  await expect(notificationPanel).toBeHidden();
+  await expect(notificationButton).toBeFocused();
+  const desktopProfile = page.getByRole('button', { name: 'Меню пользователя' }).first();
+  await desktopProfile.focus();
+  await page.keyboard.press('Enter');
+  const profileMenu = page.getByRole('menu');
+  await expect(profileMenu).toBeVisible();
+  const profileBox = await profileMenu.boundingBox();
+  expect(profileBox).not.toBeNull();
+  expect(profileBox!.x).toBeGreaterThanOrEqual(0);
+  expect(profileBox!.x + profileBox!.width).toBeLessThanOrEqual(1440);
+  expect(profileBox!.y + profileBox!.height).toBeLessThanOrEqual(900);
+  await page.keyboard.press('Escape');
+  await expect(profileMenu).toBeHidden();
+  await expect(desktopProfile).toBeFocused();
 
-  for (const width of breakpoints) {
+  for (const width of [320, 390, 768, 1440]) {
     await page.setViewportSize({ width, height: 844 });
     await expect(header).toBeVisible();
     await expect(utilities).toBeVisible();
-    await expect(page.getByText('Мониторинг', { exact: true })).toBeHidden();
-    const languageBounds = await page.getByLabel('Язык').evaluate((frame) => {
-      const frameRect = frame.getBoundingClientRect();
+    const measurement = await page.evaluate(() => {
+      const utilityGroup = document.querySelector('header [role="group"][aria-label]');
+      if (!utilityGroup) throw new Error('Missing header utilities');
+      const visible = (element: Element) => getComputedStyle(element).display !== 'none';
+      const targets = Array.from(utilityGroup.querySelectorAll<HTMLElement>('button')).filter((target) => {
+        if (!visible(target)) return false;
+        const rect = target.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      });
       return {
-        frame: { left: frameRect.left, top: frameRect.top, right: frameRect.right, bottom: frameRect.bottom },
-        buttons: Array.from(frame.querySelectorAll<HTMLElement>('[role="radio"]')).map((button) => {
-          const rect = button.getBoundingClientRect();
-          return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
+        clientWidth: document.documentElement.clientWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+        overflowingElements: Array.from(document.body.querySelectorAll<HTMLElement>('*')).flatMap((element) => {
+          const rect = element.getBoundingClientRect();
+          const style = getComputedStyle(element);
+          if (style.display === 'none' || style.visibility === 'hidden' || rect.width === 0 || rect.height === 0) return [];
+          if (rect.right <= document.documentElement.clientWidth + 1 && rect.left >= -1) return [];
+          return [{ tag: element.tagName, className: String(element.className).slice(0, 80), left: rect.left, right: rect.right, position: style.position, text: element.innerText?.slice(0, 60) }];
+        }).slice(0, 12),
+        utilityTargets: targets.map((target) => {
+          const rect = target.getBoundingClientRect();
+          return { width: rect.width, height: rect.height };
         }),
       };
     });
-    expect(languageBounds.frame.left, `language control must fit at ${width}px`).toBeGreaterThanOrEqual(0);
-    expect(languageBounds.frame.right, `language control must fit at ${width}px`).toBeLessThanOrEqual(width);
-    expect(languageBounds.frame.bottom - languageBounds.frame.top, `language frame at ${width}px`).toBeGreaterThanOrEqual(48);
-    expect(languageBounds.buttons).toHaveLength(2);
-    for (const button of languageBounds.buttons) {
-      expect(button.left, `language button left at ${width}px`).toBeGreaterThanOrEqual(languageBounds.frame.left);
-      expect(button.right, `language button right at ${width}px`).toBeLessThanOrEqual(languageBounds.frame.right);
-      expect(button.top, `language button top at ${width}px`).toBeGreaterThanOrEqual(languageBounds.frame.top);
-      expect(button.bottom, `language button bottom at ${width}px`).toBeLessThanOrEqual(languageBounds.frame.bottom);
-    }
-    const measurement = await page.evaluate(() => {
-      const headerElement = document.querySelector('header');
-      const navigation = headerElement?.querySelector('nav');
-      const utilityGroup = headerElement?.querySelector('[role="group"][aria-label]');
-      if (!headerElement || !navigation || !utilityGroup) throw new Error('Missing header region');
-
-      const box = (element: Element) => {
-        const rect = element.getBoundingClientRect();
-        return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
-      };
-      const visible = (element: Element) => getComputedStyle(element).display !== 'none';
-      const navigationBox = box(navigation);
-      const utilityBox = box(utilityGroup);
-      const utilityTargets = Array.from(utilityGroup.querySelectorAll<HTMLElement>('button,[role="radio"]'))
-        .filter(visible)
-        .map((target) => {
-          const rect = target.getBoundingClientRect();
-          return { width: rect.width, height: rect.height };
-        });
-      const mobileNavLabels = window.innerWidth <= 992
-        ? Array.from(navigation.children).flatMap((cell, index) => {
-          const label = Array.from(cell.querySelectorAll('span')).find((span) => visible(span) && span.textContent?.trim());
-          if (!label) return [];
-          const range = document.createRange();
-          range.selectNodeContents(label);
-          const textRect = range.getBoundingClientRect();
-          const cellRect = cell.getBoundingClientRect();
-          return [{
-            cell: index,
-            label: label.textContent?.trim() ?? '',
-            left: textRect.left,
-            right: textRect.right,
-            cellLeft: cellRect.left,
-            cellRight: cellRect.right,
-          }];
-        })
-        : [];
-
-      return {
-        headerHeight: headerElement.getBoundingClientRect().height,
-        clientWidth: document.documentElement.clientWidth,
-        scrollWidth: document.documentElement.scrollWidth,
-        navigationBox,
-        utilityBox,
-        utilityHeight: utilityBox.bottom - utilityBox.top,
-        utilityTargets,
-        mobileNavLabels,
-      };
-    });
-    measurements.push({ width, ...measurement });
-
-    expect(measurement.scrollWidth, `header must not cause horizontal overflow at ${width}px`).toBeLessThanOrEqual(measurement.clientWidth);
-    expect(measurement.utilityHeight, `utility toolbar must stay large enough at ${width}px`).toBeGreaterThanOrEqual(48);
-    expect(measurement.utilityTargets.length, `all toolbar targets must be present at ${width}px`).toBeGreaterThan(3);
+    expect(measurement.scrollWidth, `page must not cause horizontal overflow at ${width}px; elements: ${JSON.stringify(measurement.overflowingElements)}`).toBeLessThanOrEqual(measurement.clientWidth);
+    expect(measurement.utilityTargets.length, `header controls must be present at ${width}px`).toBeGreaterThan(0);
     for (const target of measurement.utilityTargets) {
-      expect(target.width, `toolbar target width at ${width}px`).toBeGreaterThanOrEqual(44);
-      expect(target.height, `toolbar target height at ${width}px`).toBeGreaterThanOrEqual(44);
+      expect(target.width, `header control target width at ${width}px`).toBeGreaterThanOrEqual(44);
+      expect(target.height, `header control target height at ${width}px`).toBeGreaterThanOrEqual(44);
     }
-    if (width <= 992) {
-      expect(measurement.mobileNavLabels, `all mobile navigation labels must be measured at ${width}px`).toHaveLength(5);
-      for (const label of measurement.mobileNavLabels) {
-        expect(label.left, `${label.label} must start inside its navigation cell at ${width}px`).toBeGreaterThanOrEqual(label.cellLeft - 0.5);
-        expect(label.right, `${label.label} must end inside its navigation cell at ${width}px`).toBeLessThanOrEqual(label.cellRight + 0.5);
-      }
-      for (let index = 1; index < measurement.mobileNavLabels.length; index += 1) {
-        const previous = measurement.mobileNavLabels[index - 1];
-        const current = measurement.mobileNavLabels[index];
-        expect(previous.right, `${previous.label} must not overlap ${current.label} at ${width}px`).toBeLessThanOrEqual(current.left + 0.5);
-      }
-    }
-
-    if (width <= 992) {
-      expect(measurement.headerHeight, `mobile header height at ${width}px`).toBeGreaterThanOrEqual(92);
-      expect(measurement.headerHeight, `mobile header height at ${width}px`).toBeLessThanOrEqual(94);
-    } else {
-      expect(measurement.headerHeight, `desktop header height at ${width}px`).toBeGreaterThanOrEqual(56);
-      expect(measurement.headerHeight, `desktop header height at ${width}px`).toBeLessThanOrEqual(58);
-    }
-
-    if (width === 1440 || width === 320) await screenshot(page, `header-${width}`);
-
-    const bell = utilities.getByRole('button', { name: 'Уведомления' });
-    await bell.focus();
-    await page.keyboard.press('Enter');
-    const notificationContent = page.getByText('Новых уведомлений нет', { exact: true });
-    await expect(notificationContent).toBeVisible();
-    expect(await notificationContent.evaluate((element) => getComputedStyle(element).fontSize)).toBe('13px');
-    const popover = page.locator('[data-slot="popover-content"]');
-    let previousPosition: { x: number; y: number } | null = null;
-    await expect.poll(async () => {
-      const box = await popover.boundingBox();
-      if (!box) return false;
-      const position = { x: Math.round(box.x), y: Math.round(box.y) };
-      const stable = previousPosition?.x === position.x && previousPosition?.y === position.y;
-      previousPosition = position;
-      return stable;
-    }).toBe(true);
-    const popoverBox = await popover.boundingBox();
-    const bellBox = await bell.boundingBox();
-    expect(popoverBox).not.toBeNull();
-    expect(bellBox).not.toBeNull();
-    expect(popoverBox!.x).toBeGreaterThanOrEqual(0);
-    expect(popoverBox!.x + popoverBox!.width).toBeLessThanOrEqual(width);
-    expect(popoverBox!.y).toBeGreaterThanOrEqual(bellBox!.y + bellBox!.height - 1);
-    popoverMeasurements.push({
-      width,
-      x: popoverBox!.x,
-      y: popoverBox!.y,
-      right: popoverBox!.x + popoverBox!.width,
-      bottom: popoverBox!.y + popoverBox!.height,
-    });
-    if (width === 320) await screenshot(page, 'notifications-320-open');
-    await page.keyboard.press('Escape');
-    await expect(notificationContent).toBeHidden();
-    await expect(bell).toBeFocused();
-
-    const profile = utilities.getByRole('button', { name: 'Меню пользователя' });
-    await profile.focus();
-    await page.keyboard.press('Enter');
-    const profileMenu = page.getByRole('menu');
-    await expect(profileMenu).toBeVisible();
-    const menuBox = await profileMenu.boundingBox();
-    expect(menuBox).not.toBeNull();
-    expect(menuBox!.x).toBeGreaterThanOrEqual(8);
-    expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(width - 8);
-    await page.keyboard.press('Escape');
-    await expect(profileMenu).toBeHidden();
-    await expect(profile).toBeFocused();
+    if (width === 1440 || width === 320) await screenshot(page, `layout-${width}`);
   }
 
-  const kazakh = page.getByRole('radio', { name: 'ҚАЗ' });
+  await appearance.click();
+  await page.getByRole('menuitemradio', { name: 'Тёмная' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator('html')).toHaveClass(/dark/);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('saq_theme'))).toBe('dark');
+  await screenshot(page, 'work-dark-1440');
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+
+  await page.getByRole('button', { name: /Оформление/ }).click();
+  await page.getByRole('menuitemradio', { name: 'Светлая' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await expect(page.locator('html')).not.toHaveClass(/dark/);
+  await page.getByRole('button', { name: /Оформление/ }).click();
+  await page.getByRole('menuitemradio', { name: 'Система' }).click();
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.emulateMedia({ colorScheme: 'light' });
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const menuButton = header.getByRole('button', { name: 'Разделы', exact: true });
+  await menuButton.click();
+  const drawer = page.getByRole('dialog');
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByRole('navigation').getByRole('link', { name: 'Карта' })).toBeVisible();
+  const languageTargets = drawer.getByRole('radio', { name: /^(RU|ҚАЗ)$/ });
+  await expect(languageTargets).toHaveCount(2);
+  for (const target of await languageTargets.all()) {
+    const box = await target.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+  }
+  const mobileProfile = drawer.getByRole('button', { name: 'Меню пользователя' });
+  await mobileProfile.focus();
+  await page.keyboard.press('Enter');
+  await expect(profileMenu).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(profileMenu).toBeHidden();
+  await expect(mobileProfile).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(drawer).toBeHidden();
+  await expect(menuButton).toBeFocused();
+  await menuButton.click();
+  await expect(drawer).toBeVisible();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(drawer).toBeHidden();
+  await expect.poll(() => page.locator('body').evaluate((body) => getComputedStyle(body).overflow)).not.toBe('hidden');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await menuButton.click();
+  await drawer.getByRole('navigation').getByRole('link', { name: 'Задачи' }).click();
+  await expect(page).toHaveURL(/\/work$/);
+  await expect(drawer).toBeHidden();
+
+  await menuButton.click();
+  const kazakh = drawer.getByRole('radio', { name: 'ҚАЗ' });
   await kazakh.click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'kk');
-  await expect(page.getByRole('group', { name: 'Әрекеттер мен баптаулар' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Хабарландырулар' })).toBeVisible();
-  await page.getByRole('radio', { name: 'RU' }).click();
+  await expect(kazakh).toHaveAttribute('aria-checked', 'true');
+  await drawer.getByRole('radio', { name: 'RU' }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'ru');
+  await page.keyboard.press('Escape');
+  await expect(drawer).toBeHidden();
+  await expect(header.getByRole('button', { name: 'Уведомления' })).toBeVisible();
+
+  await page.addInitScript(() => {
+    const getItem = Storage.prototype.getItem;
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.getItem = function (key: string) {
+      if (key === 'saq_theme') throw new DOMException('Storage blocked', 'SecurityError');
+      return getItem.call(this, key);
+    };
+    Storage.prototype.setItem = function (key: string, value: string) {
+      if (key === 'saq_theme') throw new DOMException('Storage blocked', 'SecurityError');
+      return setItem.call(this, key, value);
+    };
+  });
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole('button', { name: /Оформление/ }).click();
+  await page.getByRole('menuitemradio', { name: 'Светлая' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await page.getByRole('button', { name: /Оформление/ }).click();
+  await page.getByRole('menuitemradio', { name: 'Система' }).click();
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
 
   const browser = page.context().browser();
-  if (!browser) throw new Error('Missing browser for the unauthenticated login check');
-  const loginContext = await browser.newContext({ viewport: { width: 320, height: 844 }, locale: 'ru-RU' });
+  if (!browser) throw new Error('Missing browser for login theme screenshots');
+  const loginContext = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light', locale: 'ru-RU' });
   try {
     const loginPage = await loginContext.newPage();
     await loginPage.goto(new URL('/login', page.url()).toString());
-    await expect(loginPage.getByRole('heading', { level: 1, name: 'Вход в систему' })).toBeVisible();
-    const loginLanguageBounds = await loginPage.getByLabel('Язык').evaluate((frame) => {
-      const frameRect = frame.getBoundingClientRect();
-      return {
-        frame: { left: frameRect.left, top: frameRect.top, right: frameRect.right, bottom: frameRect.bottom },
-        buttons: Array.from(frame.querySelectorAll<HTMLElement>('[role="radio"]')).map((button) => {
-          const rect = button.getBoundingClientRect();
-          return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
-        }),
-      };
-    });
-    expect(loginLanguageBounds.frame.left).toBeGreaterThanOrEqual(0);
-    expect(loginLanguageBounds.frame.right).toBeLessThanOrEqual(320);
-    expect(loginLanguageBounds.frame.bottom - loginLanguageBounds.frame.top).toBeGreaterThanOrEqual(48);
-    expect(loginLanguageBounds.buttons).toHaveLength(2);
-    for (const button of loginLanguageBounds.buttons) {
-      expect(button.left).toBeGreaterThanOrEqual(loginLanguageBounds.frame.left);
-      expect(button.right).toBeLessThanOrEqual(loginLanguageBounds.frame.right);
-      expect(button.top).toBeGreaterThanOrEqual(loginLanguageBounds.frame.top);
-      expect(button.bottom).toBeLessThanOrEqual(loginLanguageBounds.frame.bottom);
-    }
+    await expect(loginPage.getByRole('heading', { name: 'Вход в систему' })).toBeVisible();
+    await screenshot(loginPage, 'login-light-1440');
+    await loginPage.emulateMedia({ colorScheme: 'dark' });
+    await expect(loginPage.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await screenshot(loginPage, 'login-dark-1440');
   } finally {
     await loginContext.close();
   }
 
-  await writeFile(`${screenshotDir}/header-breakpoints.json`, JSON.stringify(measurements, null, 2));
-  await writeFile(`${screenshotDir}/header-popover-bounds.json`, JSON.stringify(popoverMeasurements, null, 2));
   expect(harness.mutations).toEqual([]);
   expectCleanBrowser(harness);
+});
+
+test('map filters by zone, selects a real object and opens its dossier in light and dark', async ({ page }) => {
+  const harness = await installMocks(page, 'mio_officer');
+  await page.route('https://tiles.openfreemap.org/styles/**', (route) => route.fulfill({
+    contentType: 'application/json',
+    headers: { 'access-control-allow-origin': '*' },
+    body: JSON.stringify({
+      version: 8,
+      sources: {},
+      layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#e8ecf2' } }],
+    }),
+  }));
+  await page.goto('/map');
+  await expect(page.getByRole('main').getByRole('heading', { name: 'Карта объектов' })).toBeVisible();
+  await screenshot(page, 'map-light-1440');
+
+  await page.getByRole('button', { name: /Оформление/ }).click();
+  await page.getByRole('menuitemradio', { name: 'Тёмная' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await screenshot(page, 'map-dark-1440');
+
+  const zones = page.getByRole('group', { name: /Количество объектов по зонам/ });
+  const yellow = zones.getByRole('button').nth(1);
+  await yellow.click();
+  await expect(yellow).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('link', { name: /ЖК Северный бриз/ })).toBeVisible();
+  await expect(page.getByRole('link', { name: /ЖК Радужный парк/ })).toHaveCount(0);
+  const inspect = page.getByRole('button', { name: 'Выбрать объект: ЖК Северный бриз' });
+  await inspect.click();
+  await expect(inspect).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('region', { name: 'Объекты по убыванию риска' }).getByRole('heading', { name: 'ЖК Северный бриз' })).toBeVisible();
+  await page.getByRole('link', { name: 'Открыть карточку объекта' }).click();
+  await expect(page).toHaveURL(/\/objects\/7$/);
+  expect(harness.unexpected).toEqual([]);
+  expect(harness.mutations).toEqual([]);
+  expect(harness.pageErrors).toEqual([]);
+});
+
+test('graph search selects an object node and opens its real dossier', async ({ page }) => {
+  const harness = await installMocks(page, 'mio_officer');
+  await page.goto('/graph');
+  await expect(page.getByRole('main').getByRole('heading', { name: 'Граф связей' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Граф связей' })).toBeVisible();
+  await screenshot(page, 'graph-light-1440');
+
+  await page.getByRole('button', { name: /Оформление/ }).click();
+  await page.getByRole('menuitemradio', { name: 'Тёмная' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await screenshot(page, 'graph-dark-1440');
+
+  await page.getByRole('textbox', { name: 'Поиск в графе' }).fill('Северный бриз');
+  await page.getByRole('button', { name: 'ЖК Северный бриз Объект (цвет — зона)' }).click();
+  const inspector = page.getByRole('complementary', { name: 'Выбранная связь' });
+  await expect(inspector.getByRole('heading', { name: 'ЖК Северный бриз' })).toBeVisible();
+  await expect(inspector.getByText('Связано с узлами: 2')).toBeVisible();
+  await inspector.getByRole('button', { name: 'Открыть' }).click();
+  await expect(page).toHaveURL(/\/objects\/7$/);
+  expect(harness.unexpected).toEqual([]);
+  expect(harness.mutations).toEqual([]);
+  expect(harness.pageErrors).toEqual([]);
 });
 
 test('activity notification opens below the sticky header and navigates to its event', async ({ page }) => {
@@ -905,11 +1077,11 @@ test('mobile object next-step anchors clear the sticky header and available sign
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 844 });
     await page.goto('/objects/7');
-    await expect(page.getByRole('heading', { level: 1 })).toContainText('ЖК Северный бриз');
+    await expect(page.getByRole('main').getByRole('heading', { level: 1 })).toContainText('ЖК Северный бриз');
     await expect(page.getByRole('button', { name: 'Создать карточку вручную' })).toBeVisible();
     if (width === 390) {
       await page.keyboard.press('Tab');
-      await expect(page.getByRole('link', { name: 'SAQ QURYLYS' })).toBeFocused();
+      await expect(page.getByRole('banner').getByRole('button', { name: 'Разделы', exact: true })).toBeFocused();
     }
     const anchor = page.getByRole('link', { name: 'К причинам оценки' });
     await anchor.click();
@@ -935,6 +1107,26 @@ test('mobile object next-step anchors clear the sticky header and available sign
     contentType: 'application/json',
   });
   expect(harness.mutations).toEqual([]);
+  expectCleanBrowser(harness);
+});
+
+test('object hash links activate the section and scroll document, inspection, and complaint anchors into view', async ({ page }) => {
+  const object = makeRegistryObject();
+  object.inspections = [{ id: 61, object_id: 7, inspected_at: '2026-10-16T10:00:00Z', readiness_pct: 30, lat: null, lon: null, inspector_id: 1, note: 'Fixture inspection', evidence: [] }];
+  object.complaints = [{ id: 62, object_id: 7, received_at: '2026-10-16T10:00:00Z', source: 'eotinish', external_id: null, is_collective: true, signatories_count: 3, summary: 'Fixture complaint', status: 'new', confirmed_payments: false, is_verified: false, verified_by: null, verified_at: null }];
+  const harness = await installMocks(page, 'mio_officer', { object, evidenceContents: registryContentFixtures() });
+  harness.expectedCancelledEvidenceIds.add(5190);
+  for (const hash of ['#documents', '#inspection-61', '#complaint-62']) {
+    await page.goto(`/objects/7${hash}`);
+    const target = page.locator(hash);
+    await expect(target).toBeVisible();
+    const targetRect = await target.boundingBox();
+    expect(targetRect).not.toBeNull();
+    expect(targetRect!.y).toBeGreaterThanOrEqual(0);
+    expect(targetRect!.y).toBeLessThan(900);
+    if (hash === '#inspection-61') await expect(page.getByRole('tab', { name: 'Материалы и проверки' })).toHaveAttribute('aria-selected', 'true');
+    if (hash === '#documents') await expect(page.getByRole('tab', { name: 'Проверка' })).toHaveAttribute('aria-selected', 'true');
+  }
   expectCleanBrowser(harness);
 });
 
@@ -1166,19 +1358,50 @@ test('ad review makes AI scope visible, confirms the match and reports object-li
   expectCleanBrowser(harness);
 });
 
+test('switching from a reviewed ad to another ad keeps the second ad review action available', async ({ page }) => {
+  const secondAd = { ...structuredClone(adFixture), id: 12, url: 'https://example.invalid/post/12', status: 'verification' as const };
+  const harness = await installMocks(page, 'mio_officer', { ads: [structuredClone(adFixture), secondAd] });
+  await page.goto('/ads?ad=11');
+  const firstArticle = page.getByRole('article', { name: 'Публикация №11' });
+  await expect(firstArticle.getByRole('button', { name: 'Подтвердить сведения ИИ' })).toBeVisible();
+  await firstArticle.getByRole('button', { name: 'Подтвердить сведения ИИ' }).click();
+  await expect(firstArticle.getByRole('status').filter({ hasText: /Сохранено то, что подтверждает текст/ })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Публикация №12' }).click();
+  await expect(page).toHaveURL(/\/ads\?ad=12$/);
+  const secondArticle = page.getByRole('article', { name: 'Публикация №12' });
+  await expect(secondArticle).toBeVisible();
+  await expect(secondArticle.getByRole('button', { name: 'Подтвердить сведения ИИ' })).toBeVisible();
+  expect(harness.mutations.filter(({ method, path }) => method === 'POST' && path === '/ads/11/accept-llm')).toHaveLength(1);
+  expect(harness.mutations.filter(({ method, path }) => method === 'POST' && path === '/ads/12/accept-llm')).toHaveLength(0);
+  expectCleanBrowser(harness);
+});
+
 test('disabled collectors route staff to manual ad entry without starting a collector', async ({ page }) => {
   const harness = await installMocks(page, 'mio_officer', { ads: [] });
+  await page.setViewportSize({ width: 320, height: 844 });
   await page.goto('/sources');
+  await expect(page.getByRole('article').filter({ hasText: 'ЖК Северный бриз · объявления OLX' })).toBeVisible();
+  let dimensions = await page.evaluate(() => ({ client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }));
+  expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.client);
+  const watchSource = page.getByRole('switch', { name: 'Следить за источником ЖК Северный бриз · объявления OLX' });
+  await watchSource.click();
+  await expect(watchSource).toHaveAttribute('aria-checked', 'false');
+  await expect.poll(() => harness.mutations.filter(({ method, path }) => method === 'PATCH' && path === '/source-accounts/3')).toHaveLength(1);
+  expect(harness.mutations.find(({ path }) => path === '/source-accounts/3')?.body).toEqual({ is_watched: false });
+  await page.setViewportSize({ width: 390, height: 844 });
+  dimensions = await page.evaluate(() => ({ client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }));
+  expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.client);
   await expect(page.getByText(/Автоматический сбор включён для 0 из 4 платформ/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Собрать сейчас' })).toBeDisabled();
   await expect(page.getByRole('link', { name: 'Добавить рекламу по ссылке или вручную' })).toHaveAttribute('href', '/ads');
   await page.getByRole('link', { name: 'Добавить рекламу по ссылке или вручную' }).click();
   await expect(page).toHaveURL(/\/ads$/);
-  await expect(page.getByText('Рекламных публикаций пока нет')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Открытая публикация' }).getByText('Рекламных публикаций пока нет')).toBeVisible();
   await page.getByRole('button', { name: 'Добавить вручную' }).first().click();
   await expect(page.getByRole('dialog').getByRole('heading', { name: 'Добавить публикацию вручную' })).toBeVisible();
   await screenshot(page, 'ads-manual-entry');
-  expect(harness.mutations).toEqual([]);
+  expect(harness.mutations.filter(({ method }) => method !== 'PATCH')).toEqual([]);
   expectCleanBrowser(harness);
 });
 
@@ -1350,9 +1573,16 @@ test.describe('Ask AI panel', () => {
     await panel.getByRole('button', { name: /С чего начать день\?/ }).click();
     await expect(panel.getByText('жёлтой', { exact: true })).toBeVisible();
 
+    await panel.getByRole('button', { name: 'Расширить панель' }).click();
+    await expect(panel.getByRole('button', { name: 'Сузить панель' })).toHaveAttribute('aria-pressed', 'true');
+
     await page.reload();
     await expect(panel).toBeVisible();
     await expect(panel.getByText('жёлтой', { exact: true })).toBeVisible();
+    await expect(panel.getByRole('button', { name: 'Сузить панель' })).toHaveAttribute('aria-pressed', 'true');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(panel.getByRole('button', { name: 'Диалоги' })).toBeVisible();
+    await expect(panel.getByRole('button', { name: 'Новый диалог' })).toBeVisible();
     await panel.getByRole('button', { name: 'Диалоги' }).click();
     await expect(page.getByRole('list', { name: 'Диалоги' }).getByRole('button', { name: 'С чего начать день?', exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Новый диалог' }).first().click();
