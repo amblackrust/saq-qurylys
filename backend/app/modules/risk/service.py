@@ -68,7 +68,7 @@ def load_scoring_input(
         for row in session.scalars(documents_stmt.order_by(Document.id))
     ]
     window_start = now - timedelta(days=settings.ad_window_days)
-    in_window = AD_TIMESTAMP.between(window_start, now) if as_of else window_start <= AD_TIMESTAMP
+    in_window = AD_TIMESTAMP.between(window_start, now)
     ad_rows = session.execute(
         select(AdPost.id, AdPost.payment_schemes, AdPost.status, AdPost.claimed_readiness_pct)
         .where(AdPost.object_id == obj.id, in_window)

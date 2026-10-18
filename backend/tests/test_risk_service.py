@@ -279,6 +279,24 @@ def test_ads_count_only_inside_the_window(db: Session, world: World) -> None:
     assert factor(result, engine.R2)["triggered"] is False  # the deposit ad is outside the window
 
 
+def test_future_ads_do_not_affect_the_score_until_their_publication_time(db: Session, world: World) -> None:
+    obj = make_object(db, world.ust, readiness_actual_pct=40)
+    add_inspection(db, obj, pct=40)
+    published_at = NOW + timedelta(days=1)
+    add_ad(db, obj, published_at, hits=DEPOSIT, claimed_readiness_pct=90)
+
+    current = recalc(db, obj)
+    assert not factor(current, engine.R2)["triggered"]
+    assert not factor(current, engine.R3)["triggered"]
+    assert not factor(current, engine.R5)["triggered"]
+
+    later = service.recalculate(db, obj.id, now=published_at + timedelta(seconds=1))
+    assert later is not None
+    assert factor(later, engine.R2)["triggered"]
+    assert factor(later, engine.R3)["triggered"]
+    assert factor(later, engine.R5)["triggered"]
+
+
 def test_window_follows_the_setting(db: Session, world: World) -> None:
     save_settings(db, {"ad_window_days": 7})
     obj = make_object(db, world.ust)
