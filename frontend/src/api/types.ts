@@ -809,6 +809,49 @@ export interface SignalDetail extends SignalRow {
   audit: AuditEntry[];
 }
 
+export type SignalMaterialKind = 'cover_docx' | 'signal_pdf' | 'publications_xlsx' | 'inventory_pdf' | 'evidence';
+
+export interface SignalMaterialFile {
+  kind: SignalMaterialKind;
+  filename: string;
+  evidence_id: number | null;
+  content_type: string | null;
+  size_bytes: number | null;
+  sha256: string | null;
+  captured_at: string | null;
+  source_label: string;
+  source_url: string | null;
+  available: boolean;
+  selected: boolean;
+  missing_reason: string | null;
+}
+
+export interface SignalMissingMaterial {
+  source_label: string;
+  reason: string;
+}
+
+export interface SignalMaterialLimits {
+  max_evidence_files: number;
+  max_file_bytes: number;
+  max_total_bytes: number;
+}
+
+export interface SignalMaterials {
+  signal_id: number;
+  number: string;
+  status: SignalStatus;
+  recipient: SignalRecipient | null;
+  is_draft: boolean;
+  formed_at: string;
+  snapshot_at: string;
+  snapshot_publications_capped: boolean;
+  files: SignalMaterialFile[];
+  missing_materials: SignalMissingMaterial[];
+  warnings: string[];
+  limits: SignalMaterialLimits;
+}
+
 export interface SignalListParams {
   status?: SignalStatus;
   object_id?: number;

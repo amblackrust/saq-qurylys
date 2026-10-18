@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { expect, test } from '../support/test';
 import type { Page, Route } from '@playwright/test';
-import type { ActivityEvent, AdDetail, Assignment, Assignee, EvidenceMeta, LinkGraph, ObjectDetail, ObjectDocument, Role, SearchResults, SignalDetail, SignalRecipient, SignalStatus, User, VisionAsset, VisionFinding, VisionFrame, VisionSessionDetail } from '../../src/api/types';
+import type { ActivityEvent, AdDetail, Assignment, Assignee, EvidenceMeta, LinkGraph, ObjectDetail, ObjectDocument, Role, SearchResults, SignalDetail, SignalMaterials, SignalRecipient, SignalStatus, User, VisionAsset, VisionFinding, VisionFrame, VisionSessionDetail } from '../../src/api/types';
 
 const screenshotDir = '/tmp/saq-macos-ui';
 const objectRow = {
@@ -147,6 +147,139 @@ function makeSignal(status: SignalStatus = 'requires_confirmation', recipient: S
     responded_by: status === 'responded' || status === 'closed' ? 2 : null,
     created_by: 1,
     audit: [],
+  };
+}
+
+function makeSignalMaterials(signal: SignalDetail = makeSignal()): SignalMaterials {
+  const isDraft = signal.sent_at === null;
+  return {
+    signal_id: signal.id,
+    number: signal.number,
+    status: signal.status,
+    recipient: signal.recipient,
+    is_draft: isDraft,
+    formed_at: '2026-10-17T12:45:00Z',
+    snapshot_at: '2026-10-16T12:30:00Z',
+    snapshot_publications_capped: true,
+    files: [
+      {
+        kind: 'cover_docx',
+        filename: 'cover.docx',
+        evidence_id: null,
+        content_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        size_bytes: null,
+        sha256: null,
+        captured_at: null,
+        source_label: 'Сопроводительное письмо',
+        source_url: null,
+        available: true,
+        selected: true,
+        missing_reason: null,
+      },
+      {
+        kind: 'signal_pdf',
+        filename: 'SIG-2026-0042.pdf',
+        evidence_id: null,
+        content_type: 'application/pdf',
+        size_bytes: isDraft ? null : 80_000,
+        sha256: isDraft ? null : 'f'.repeat(64),
+        captured_at: isDraft ? null : '2026-10-15T11:00:00Z',
+        source_label: isDraft ? 'Сигнальная карточка (PDF)' : 'Архивная PDF-копия карточки',
+        source_url: null,
+        available: true,
+        selected: true,
+        missing_reason: null,
+      },
+      {
+        kind: 'publications_xlsx',
+        filename: 'publications.xlsx',
+        evidence_id: null,
+        content_type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        size_bytes: null,
+        sha256: null,
+        captured_at: null,
+        source_label: 'Публикации из снимка',
+        source_url: null,
+        available: true,
+        selected: true,
+        missing_reason: null,
+      },
+      {
+        kind: 'inventory_pdf',
+        filename: 'inventory.pdf',
+        evidence_id: null,
+        content_type: 'application/pdf',
+        size_bytes: null,
+        sha256: null,
+        captured_at: null,
+        source_label: 'Опись материалов',
+        source_url: null,
+        available: true,
+        selected: true,
+        missing_reason: null,
+      },
+      {
+        kind: 'evidence',
+        filename: 'evidence-501.jpg',
+        evidence_id: 501,
+        content_type: 'image/jpeg',
+        size_bytes: 250_000,
+        sha256: 'd'.repeat(64),
+        captured_at: '2026-10-15T10:00:00Z',
+        source_label: 'Фото фасада',
+        source_url: 'https://example.invalid/evidence/501',
+        available: true,
+        selected: true,
+        missing_reason: null,
+      },
+      {
+        kind: 'evidence',
+        filename: 'evidence-502.pdf',
+        evidence_id: 502,
+        content_type: 'application/pdf',
+        size_bytes: 100_000,
+        sha256: 'e'.repeat(64),
+        captured_at: '2026-10-15T11:00:00Z',
+        source_label: 'Протокол обхода',
+        source_url: null,
+        available: true,
+        selected: true,
+        missing_reason: null,
+      },
+      {
+        kind: 'evidence',
+        filename: 'evidence-503.bin',
+        evidence_id: 503,
+        content_type: null,
+        size_bytes: null,
+        sha256: null,
+        captured_at: null,
+        source_label: 'Файл вне снимка',
+        source_url: null,
+        available: false,
+        selected: false,
+        missing_reason: 'Файл не входит в снимок материалов',
+      },
+      {
+        kind: 'evidence',
+        filename: 'evidence-504-inspection-entry-and-common-areas.pdf',
+        evidence_id: 504,
+        content_type: 'application/pdf',
+        size_bytes: 318_720,
+        sha256: 'f'.repeat(64),
+        captured_at: '2026-10-15T12:00:00Z',
+        source_label: 'Акт обследования входной группы и мест общего пользования с приложением перечня замечаний',
+        source_url: 'https://example.invalid/evidence/504',
+        available: true,
+        selected: true,
+        missing_reason: null,
+      },
+    ],
+    missing_materials: [
+      { source_label: 'Файл вне снимка', reason: 'Файл не входит в снимок материалов' },
+    ],
+    warnings: ['В снимке перечислено 50 публикаций; перечень при создании карточки мог быть ограничен.'],
+    limits: { max_evidence_files: 50, max_file_bytes: 20_971_520, max_total_bytes: 62_914_560 },
   };
 }
 
@@ -360,7 +493,12 @@ interface MockState {
   evidenceFailures?: Record<number, number>;
   expectedEvidence503Responses: number;
   expectedExport413Responses: number;
+  expectedPackage413Responses: number;
   signal: SignalDetail;
+  signalMaterials?: SignalMaterials;
+  packageFailure?: { status: number; code: string; message: string };
+  materialsDelayMs?: number;
+  packageDelayMs?: number;
   ad: AdDetail;
   object: ObjectDetail;
   ads: AdDetail[];
@@ -395,6 +533,7 @@ interface Harness {
   assignmentRequests: URL[];
   searchQueries: string[];
   downloadRequests: Array<{ url: URL; authorization: string | null }>;
+  materialRequests: Array<{ url: URL; authorization: string | null }>;
   logoutAuthorization: string | null;
   evidenceRequests: Array<{ id: number; authorization: string | null }>;
   expectedCancelledEvidenceIds: Set<number>;
@@ -415,6 +554,7 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
     assignments: [],
     expectedEvidence503Responses: 0,
     expectedExport413Responses: 0,
+    expectedPackage413Responses: 0,
     signal: makeSignal(),
     ad: structuredClone(adFixture),
     object: makeObject(),
@@ -430,6 +570,7 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
     assignmentRequests: [],
     searchQueries: [],
     downloadRequests: [],
+    materialRequests: [],
     logoutAuthorization: null,
     evidenceRequests: [],
     expectedCancelledEvidenceIds: new Set(),
@@ -513,6 +654,25 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
         status: 200,
         contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         body: Buffer.from('mock xlsx workbook'),
+      });
+    }
+    if (method === 'GET' && /^\/signals\/\d+\/materials$/.test(path)) {
+      harness.materialRequests.push({ url, authorization: request.headers()['authorization'] ?? null });
+      if (state.materialsDelayMs) await new Promise((resolve) => setTimeout(resolve, state.materialsDelayMs));
+      return json(route, state.signalMaterials ?? makeSignalMaterials(state.signal));
+    }
+    if (method === 'GET' && /^\/signals\/\d+\/package\.zip$/.test(path)) {
+      harness.downloadRequests.push({ url, authorization: request.headers()['authorization'] ?? null });
+      if (state.packageDelayMs) await new Promise((resolve) => setTimeout(resolve, state.packageDelayMs));
+      if (state.packageFailure) {
+        if (state.packageFailure.status === 413) state.expectedPackage413Responses += 1;
+        return json(route, { detail: { code: state.packageFailure.code, message: state.packageFailure.message } }, state.packageFailure.status);
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/zip',
+        headers: { 'Content-Disposition': 'attachment; filename="SIG-2026-0042-package.zip"' },
+        body: Buffer.from('mock zip package'),
       });
     }
     if (method === 'GET' && path === '/graph') return json(route, state.graph ?? graphFixture);
@@ -703,9 +863,9 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
   return harness;
 }
 
-async function screenshot(page: Page, name: string) {
+async function screenshot(page: Page, name: string, fullPage = true) {
   await mkdir(screenshotDir, { recursive: true });
-  await page.screenshot({ path: `${screenshotDir}/${name}.png`, fullPage: true });
+  await page.screenshot({ path: `${screenshotDir}/${name}.png`, fullPage });
 }
 
 function expectCleanBrowser(harness: Harness) {
@@ -718,7 +878,7 @@ function expectCleanBrowser(harness: Harness) {
   const fixture413ConsoleErrors = harness.consoleErrors.filter((message) =>
     message === 'Failed to load resource: the server responded with a status of 413 (Payload Too Large)',
   );
-  expect(fixture413ConsoleErrors.length).toBeLessThanOrEqual(harness.state.expectedExport413Responses);
+  expect(fixture413ConsoleErrors.length).toBeLessThanOrEqual(harness.state.expectedExport413Responses + harness.state.expectedPackage413Responses);
   expect(harness.consoleErrors.filter((message) =>
     message !== 'Failed to load resource: the server responded with a status of 503 (Service Unavailable)' &&
     message !== 'Failed to load resource: the server responded with a status of 413 (Payload Too Large)',
@@ -1651,6 +1811,241 @@ test('recipient filters stay role-aware; send, answer and close each have explic
   expectCleanBrowser(harness);
 });
 
+test('registry staff can review and download a signal package without changing the card lifecycle', async ({ page }) => {
+  const signal = makeSignal('requires_confirmation', 'gask');
+  const harness = await installMocks(page, 'mio_officer', {
+    signal,
+    signalMaterials: makeSignalMaterials(signal),
+    materialsDelayMs: 150,
+    packageDelayMs: 200,
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/signals/42');
+  await expect(page.getByRole('heading', { level: 2, name: 'Проверьте факты и получателя' })).toBeVisible();
+  const openPackage = page.getByRole('button', { name: 'Подготовить пакет' });
+  await expect(openPackage).toBeVisible();
+  expect(harness.materialRequests).toHaveLength(0);
+
+  await openPackage.click();
+  const dialog = page.getByRole('dialog', { name: 'Подготовка пакета материалов' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText('Загрузка…')).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: 'Состав пакета' })).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: 'Отдельные исходные файлы доказательств' })).toBeVisible();
+  await expect(dialog.getByText(/Сигнальная карточка в PDF включается целиком, если доступна/)).toBeVisible();
+  await expect(dialog.getByText('Черновик: пакет не направляется адресату.')).toBeVisible();
+  await expect(dialog.getByText('Черновик: пакет не направляется адресату.', { exact: true })).toHaveCount(1);
+  await expect(dialog.getByText('Сохранённый снимок карточки')).toBeVisible();
+  await expect(dialog.getByText('Предпросмотр на')).toBeVisible();
+  await expect(dialog.getByText('Сигнальная карточка (PDF)', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('Сопроводительное письмо (DOCX)', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('В снимке перечислено 50 публикаций; перечень при создании карточки мог быть ограничен.', { exact: true })).toHaveCount(1);
+  await expect(dialog.getByText('Не хватает материалов')).toBeVisible();
+  await expect(dialog.getByText('Файл не входит в снимок материалов').first()).toBeVisible();
+  await expect(dialog.getByRole('checkbox')).toHaveCount(4);
+  const facadeFile = dialog.getByRole('checkbox', { name: 'Включить исходный файл: Фото фасада' });
+  const protocolFile = dialog.getByRole('checkbox', { name: 'Включить исходный файл: Протокол обхода' });
+  const unavailableFile = dialog.getByRole('checkbox', { name: 'Включить исходный файл: Файл вне снимка' });
+  await expect(facadeFile).toBeChecked();
+  await expect(protocolFile).toBeChecked();
+  await expect(unavailableFile).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Подтвердить и направить' })).toHaveCount(0);
+  const facadeRow = dialog.locator('li').filter({ hasText: 'Фото фасада' });
+  await expect(facadeRow.getByRole('link', { name: 'Открыть источник: Фото фасада' })).toBeVisible();
+  await expect(facadeRow.getByText(/^Размер:/)).toBeVisible();
+  await expect(facadeRow.getByText(/^Зафиксировано:/)).toBeVisible();
+  const facadeDetails = facadeRow.locator('details');
+  await expect(facadeDetails).not.toHaveAttribute('open', '');
+  await facadeDetails.locator('summary').click();
+  await expect(facadeDetails.getByText(/^SHA-256:/)).toBeVisible();
+  await facadeDetails.locator('summary').click();
+  await screenshot(page, 'signal-package-dialog-light', false);
+
+  await expect.poll(() => harness.materialRequests.length).toBe(1);
+  expect(harness.materialRequests[0]?.url.pathname).toBe('/api/v1/signals/42/materials');
+  expect(harness.materialRequests[0]?.authorization).toBe('Bearer mock-ui-session');
+
+  const zipButton = dialog.getByRole('button', { name: 'Скачать ZIP' });
+  const allResponsePromise = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/signals/42/package.zip');
+  const allDownloadPromise = page.waitForEvent('download');
+  await zipButton.click();
+  await expect(zipButton).toHaveAttribute('aria-busy', 'true');
+  const allResponse = await allResponsePromise;
+  expect(allResponse.headers()['content-type']).toContain('application/zip');
+  const allDownload = await allDownloadPromise;
+  await expect(zipButton).not.toHaveAttribute('aria-busy', 'true');
+  expect(allDownload.suggestedFilename()).toBe('AYQYN_SIG-2026-0042_package.zip');
+  await expect.poll(() => harness.downloadRequests.filter(({ url }) => url.pathname === '/api/v1/signals/42/package.zip')).toHaveLength(1);
+  const packageRequests = () => harness.downloadRequests.filter(({ url }) => url.pathname === '/api/v1/signals/42/package.zip');
+  expect(packageRequests()[0]?.authorization).toBe('Bearer mock-ui-session');
+  expect(packageRequests()[0]?.url.searchParams.get('include_evidence')).toBe('true');
+  expect(packageRequests()[0]?.url.searchParams.has('evidence_id')).toBe(false);
+
+  await facadeFile.click();
+  await expect(facadeFile).not.toBeChecked();
+  const partialDownloadPromise = page.waitForEvent('download');
+  await zipButton.click();
+  await partialDownloadPromise;
+  expect(packageRequests()[1]?.url.searchParams.has('include_evidence')).toBe(false);
+  expect(packageRequests()[1]?.url.searchParams.getAll('evidence_id')).toEqual(['502', '504']);
+
+  await dialog.getByRole('button', { name: 'Не включать исходные файлы' }).click();
+  await expect(facadeFile).not.toBeChecked();
+  await expect(protocolFile).not.toBeChecked();
+  const noEvidenceDownloadPromise = page.waitForEvent('download');
+  await zipButton.click();
+  await noEvidenceDownloadPromise;
+  expect(packageRequests()[2]?.url.searchParams.get('include_evidence')).toBe('false');
+  expect(packageRequests()[2]?.url.searchParams.has('evidence_id')).toBe(false);
+  expect(harness.state.signal.status).toBe('requires_confirmation');
+  expect(harness.mutations).toEqual([]);
+
+  await dialog.getByRole('button', { name: 'Закрыть' }).last().click();
+  await page.getByRole('button', { name: /Оформление/ }).click();
+  await page.getByRole('menuitemradio', { name: 'Тёмная' }).click();
+  await openPackage.click();
+  await expect(dialog).toBeVisible();
+  await screenshot(page, 'signal-package-dialog-dark', false);
+  await dialog.getByRole('button', { name: 'Закрыть' }).last().click();
+
+  await page.getByText('ҚАЗ', { exact: true }).click();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'kk');
+  await page.getByRole('button', { name: 'Пакетті дайындау' }).click();
+  const kkDialog = page.getByRole('dialog', { name: 'Материалдар пакетін дайындау' });
+  await expect(kkDialog.getByRole('heading', { name: 'Дәлелдердің жеке бастапқы файлдары' })).toBeVisible();
+  harness.state.packageFailure = {
+    status: 413,
+    code: 'package_file_too_large',
+    message: 'File exceeds the package size limit',
+  };
+  const errorResponsePromise = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/signals/42/package.zip');
+  await kkDialog.getByRole('button', { name: 'ZIP жүктеп алу' }).click();
+  await expect(kkDialog.getByRole('button', { name: 'ZIP жүктеп алу' })).toHaveAttribute('aria-busy', 'true');
+  expect((await errorResponsePromise).status()).toBe(413);
+  await expect(page.getByText('Пакетті жүктеу мүмкін болмады', { exact: true })).toBeVisible();
+  await expect(page.getByText('Файлдардың бірінің өлшемі рұқсат етілген шектен асты.', { exact: true })).toBeVisible();
+  expect(packageRequests()[3]?.authorization).toBe('Bearer mock-ui-session');
+  expect(packageRequests()[3]?.url.searchParams.get('include_evidence')).toBe('false');
+  expect(harness.state.signal.status).toBe('requires_confirmation');
+  expect(harness.mutations).toEqual([]);
+  await screenshot(page, 'signal-package-dialog-dark-kk-error', false);
+  await kkDialog.getByRole('button', { name: 'Жабу' }).last().click();
+
+  await page.getByText('RU', { exact: true }).click();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'ru');
+  await page.getByRole('button', { name: /Оформление/ }).click();
+  await page.getByRole('menuitemradio', { name: 'Светлая' }).click();
+  await page.setViewportSize({ width: 320, height: 844 });
+  const largeFontButton = page.getByRole('button', { name: 'Крупный шрифт' });
+  await largeFontButton.click();
+  await expect(largeFontButton).toHaveAttribute('aria-pressed', 'true');
+  await openPackage.click();
+  await expect(dialog).toBeVisible();
+  const mobileBox = await dialog.boundingBox();
+  const mobileOverflow = await dialog.evaluate((element) => ({
+    client: element.clientWidth,
+    scroll: element.scrollWidth,
+  }));
+  expect(mobileBox).not.toBeNull();
+  expect(mobileBox!.x).toBeGreaterThanOrEqual(0);
+  expect(mobileBox!.x + mobileBox!.width).toBeLessThanOrEqual(320);
+  expect(mobileOverflow.scroll).toBeLessThanOrEqual(mobileOverflow.client);
+  const body = dialog.locator('[data-slot="signal-package-body"]');
+  const bodyScroll = await body.evaluate((element) => ({
+    client: element.clientHeight,
+    scroll: element.scrollHeight,
+  }));
+  expect(bodyScroll.scroll).toBeGreaterThan(bodyScroll.client);
+  await expect(body).toHaveCSS('overflow-y', 'auto');
+  const header = dialog.locator('[data-slot="dialog-header"]');
+  const headerBox = await header.boundingBox();
+  expect(headerBox).not.toBeNull();
+  const mobileZipButton = dialog.getByRole('button', { name: 'Скачать ZIP' });
+  const closeButton = dialog.getByRole('button', { name: 'Закрыть' }).last();
+  const viewportHeight = await page.evaluate(() => window.innerHeight);
+  const assertButtonInViewport = async (button: typeof mobileZipButton) => {
+    const box = await button.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.y).toBeGreaterThanOrEqual(0);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(viewportHeight);
+    return box!.y;
+  };
+  const headerY = headerBox!.y;
+  const zipButtonY = await assertButtonInViewport(mobileZipButton);
+  const closeButtonY = await assertButtonInViewport(closeButton);
+  await body.evaluate((element) => {
+    const scrollable = element as HTMLElement;
+    scrollable.scrollTop = scrollable.scrollHeight;
+  });
+  await expect.poll(() => body.evaluate((element) => (element as HTMLElement).scrollTop)).toBeGreaterThan(0);
+  expect((await header.boundingBox())?.y).toBe(headerY);
+  expect(await assertButtonInViewport(mobileZipButton)).toBe(zipButtonY);
+  expect(await assertButtonInViewport(closeButton)).toBe(closeButtonY);
+  const longEvidenceRow = dialog.locator('li').filter({
+    hasText: 'Акт обследования входной группы и мест общего пользования с приложением перечня замечаний',
+  });
+  await longEvidenceRow.scrollIntoViewIfNeeded();
+  await expect(longEvidenceRow).toBeVisible();
+  expect(await assertButtonInViewport(mobileZipButton)).toBe(zipButtonY);
+  expect(await assertButtonInViewport(closeButton)).toBe(closeButtonY);
+  await screenshot(page, 'signal-package-mobile-320-large-ru', false);
+  await expect(dialog.getByRole('heading', { name: 'Отдельные исходные файлы доказательств' })).toBeVisible();
+  expect(harness.state.signal.status).toBe('requires_confirmation');
+  expect(harness.mutations).toEqual([]);
+  expectCleanBrowser(harness);
+});
+
+test('signal package preview is available to admins and not fetched for recipient roles', async ({ page }) => {
+  const signal = makeSignal('sent', 'gask');
+  const harness = await installMocks(page, 'admin', { signal, signalMaterials: makeSignalMaterials(signal) });
+  await page.goto('/signals/42');
+  const openPackage = page.getByRole('button', { name: 'Подготовить пакет' });
+  await expect(openPackage).toBeVisible();
+  await openPackage.click();
+  const dialog = page.getByRole('dialog', { name: 'Подготовка пакета материалов' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText('Архивная PDF-копия сигнальной карточки', { exact: true })).toBeVisible();
+  await expect.poll(() => harness.materialRequests.length).toBe(1);
+  expect(harness.materialRequests[0]?.authorization).toBe('Bearer mock-ui-session');
+
+  harness.state.role = 'gask';
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Подготовить пакет' })).toHaveCount(0);
+  expect(harness.materialRequests).toHaveLength(1);
+  expect(harness.mutations).toEqual([]);
+  expectCleanBrowser(harness);
+});
+
+test('signal package waits for unsaved card edits without autosaving or sending', async ({ page }) => {
+  const signal = makeSignal('requires_confirmation', 'gask');
+  const harness = await installMocks(page, 'mio_officer', {
+    signal,
+    signalMaterials: makeSignalMaterials(signal),
+  });
+  await page.goto('/signals/42');
+  await page.getByRole('textbox', { name: 'Примечание' }).fill('Несохранённая правка карточки');
+  const saveButton = page.getByRole('button', { name: 'Сохранить' });
+  await expect(saveButton).toBeVisible();
+  await expect(saveButton).toBeEnabled();
+  await expect(page.getByRole('status').filter({ hasText: 'Есть несохранённые изменения' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Подготовить пакет' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Подготовка пакета материалов' });
+  await expect(dialog.getByRole('alert')).toContainText('сначала сохраните изменения кнопкой «Сохранить»');
+  await expect(dialog.getByRole('button', { name: 'Скачать ZIP' })).toBeDisabled();
+  expect(harness.materialRequests[0]?.authorization).toBe('Bearer mock-ui-session');
+  expect(harness.downloadRequests.filter(({ url }) => url.pathname === '/api/v1/signals/42/package.zip')).toHaveLength(0);
+  expect(harness.state.signal.sections.note).not.toBe('Несохранённая правка карточки');
+  expect(harness.state.signal.status).toBe('requires_confirmation');
+  expect(harness.mutations).toEqual([]);
+
+  await dialog.getByRole('button', { name: 'Закрыть' }).last().click();
+  await expect(saveButton).toBeVisible();
+  await expect(saveButton).toBeEnabled();
+  expect(harness.mutations).toEqual([]);
+  expectCleanBrowser(harness);
+});
+
 test('signal creation runs once after a successful object lookup and navigates to the new card', async ({ page }) => {
   const harness = await installMocks(page, 'mio_officer', { object: makeObject('green') });
   await page.goto('/objects/7');
@@ -2081,7 +2476,7 @@ test('signal workbook follows list filters, surfaces export limits, and is local
   await exportButton.click();
   await expect(exportButton).toHaveAttribute('aria-busy', 'true');
   await expect(page.getByText('Не удалось скачать карточки')).toBeVisible();
-  await expect(page.getByText('Export exceeds the 10,000-row limit')).toBeVisible();
+  await expect(page.getByText('Экспорт превышает лимит в 10 000 строк. Уточните фильтры.')).toBeVisible();
   const failedExport = harness.downloadRequests.find(({ url }) => url.pathname === '/api/v1/signals/export.xlsx');
   expect(failedExport?.authorization).toBe('Bearer mock-ui-session');
   expect(failedExport?.url.searchParams.get('status')).toBe('responded');
@@ -2102,6 +2497,10 @@ test('signal workbook follows list filters, surfaces export limits, and is local
   await page.evaluate(() => localStorage.setItem('saq_lang', 'kk'));
   await page.reload();
   await expect(page.getByRole('button', { name: 'Excel жүктеп алу' })).toBeVisible();
+  harness.state.exportFailurePaths = ['/signals/export.xlsx'];
+  harness.state.expectedExport413Responses = 2;
+  await page.getByRole('button', { name: 'Excel жүктеп алу' }).click();
+  await expect(page.getByText('Экспорт 10 000 жол шегінен асты. Сүзгілерді нақтылаңыз.')).toBeVisible();
   expectCleanBrowser(harness);
 });
 

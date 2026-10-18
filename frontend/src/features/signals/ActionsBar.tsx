@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { IconFileTypePdf } from '@tabler/icons-react';
+import { IconFileTypePdf, IconPackage } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import { downloadFile } from '@/api/client';
 import { useCloseSignal } from '@/api/hooks/signals';
@@ -14,8 +14,9 @@ import { ConfirmSendModal } from './ConfirmSendModal';
 import { ResponseModal } from './ResponseModal';
 import { ReturnModal } from './ReturnModal';
 import { useApplySignal } from './useApplySignal';
+import { SignalPackageDialog } from './SignalPackageDialog';
 
-type Dialog = 'send' | 'return' | 'respond';
+type Dialog = 'send' | 'return' | 'respond' | 'package';
 
 /** Downloads a file with the busy state and the error toast (`downloadFile` is not a mutation, so the global toast does not cover it). */
 function DownloadButton({ path, filename, label }: { path: string; filename: string; label: string }) {
@@ -59,7 +60,7 @@ interface Props {
 
 export function ActionsBar({ detail, recipient, dirty, canSave }: Props) {
   const { t } = useTranslation('signals');
-  const { user, canManageSignals, isRecipient } = useAuth();
+  const { user, canManageSignals, canEditRegistry, isRecipient } = useAuth();
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const closeSignal = useCloseSignal();
   const apply = useApplySignal();
@@ -130,6 +131,12 @@ export function ActionsBar({ detail, recipient, dirty, canSave }: Props) {
             {t('actions.close')}
           </Button>
         )}
+        {canEditRegistry && (
+          <Button className="min-h-11" variant="secondary" onClick={() => setDialog('package')}>
+            <IconPackage />
+            {t('package.open')}
+          </Button>
+        )}
         <DownloadButton path={`/signals/${detail.id}/pdf`} filename={`${detail.number}.pdf`} label={t('detail.pdf')} />
         {detail.sent_pdf_evidence_id !== null && (
           <DownloadButton
@@ -144,6 +151,7 @@ export function ActionsBar({ detail, recipient, dirty, canSave }: Props) {
       )}
       {canReview && <ReturnModal opened={dialog === 'return'} onClose={close} detail={detail} />}
       {canRespond && <ResponseModal opened={dialog === 'respond'} onClose={close} detail={detail} />}
+      {canEditRegistry && <SignalPackageDialog opened={dialog === 'package'} onClose={close} detail={detail} dirty={dirty} />}
     </>
   );
 }

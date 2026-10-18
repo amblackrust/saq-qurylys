@@ -1,7 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../client';
 import { qk } from '../keys';
-import type { Paged, SignalDetail, SignalListParams, SignalPatch, SignalRecipient, SignalRow } from '../types';
+import type { Paged, SignalDetail, SignalListParams, SignalMaterials, SignalPatch, SignalRecipient, SignalRow } from '../types';
 
 export function useSignals(params: SignalListParams) {
   return useQuery({
@@ -15,6 +15,14 @@ export function useSignal(id: number) {
   return useQuery({
     queryKey: qk.signal(id),
     queryFn: () => api<SignalDetail>(`/signals/${id}`),
+  });
+}
+
+export function useSignalMaterials(id: number, enabled = true) {
+  return useQuery({
+    queryKey: qk.signalMaterials(id),
+    queryFn: () => api<SignalMaterials>(`/signals/${id}/materials`),
+    enabled,
   });
 }
 
