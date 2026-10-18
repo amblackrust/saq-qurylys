@@ -1998,30 +1998,78 @@ test('recipients are redirected away from registry assignment control', async ({
 test('work reports and object dossiers download authenticated PDF files', async ({ page }) => {
   const harness = await installMocks(page, 'mio_officer');
   await page.goto('/work');
+  const reportPanel = page.locator('section[aria-labelledby="work-report-title"]');
+  const reportZones = reportPanel.getByRole('combobox');
+  const reportScreenshot = async (name: string) => {
+    const dir = '/tmp/report-objects';
+    await mkdir(dir, { recursive: true });
+    await page.screenshot({ path: `${dir}/${name}.png`, fullPage: true });
+  };
+
+  await expect(reportZones).toBeVisible();
+  await expect(reportZones).toContainText('Красные и жёлтые');
+  await reportScreenshot('report-priority-light-ru');
   const reportDownloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Сформировать доклад (PDF)' }).click();
   const reportDownload = await reportDownloadPromise;
   expect(reportDownload.suggestedFilename()).toMatch(/^doklad-\d{4}-\d{2}-\d{2}-\d{4}-\d{2}-\d{2}\.pdf$/);
   await screenshot(page, 'work-report-light');
+  const reportRequests = () => harness.downloadRequests.filter(({ url }) => url.pathname === '/api/v1/dashboard/report.pdf');
+  const priorityRequests = reportRequests();
+  expect(priorityRequests).toHaveLength(1);
+  expect(priorityRequests[0]!.url.searchParams.get('zones')).toBe('priority');
   await page.getByRole('button', { name: /Оформление/ }).click();
   await page.getByRole('menuitemradio', { name: 'Тёмная' }).click();
+  await reportScreenshot('report-priority-dark-ru');
   await screenshot(page, 'work-report-dark');
-  const reportRequest = harness.downloadRequests.find(({ url }) => url.pathname === '/api/v1/dashboard/report.pdf');
-  expect(reportRequest?.authorization).toBe('Bearer mock-ui-session');
-  expect(reportRequest?.url.searchParams.get('from')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-  expect(reportRequest?.url.searchParams.get('to')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-  expect(reportRequest!.url.searchParams.get('from')! <= reportRequest!.url.searchParams.get('to')!).toBe(true);
+  await reportZones.click();
+  await expect(page.getByRole('option', { name: 'Красные и жёлтые' })).toBeVisible();
+  await page.getByRole('option', { name: 'Все объекты', exact: true }).click();
+  await expect(reportZones).toContainText('Все объекты');
+  await reportScreenshot('report-all-dark-ru');
+  const allZonesDownloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Сформировать доклад (PDF)' }).click();
+  const allZonesDownload = await allZonesDownloadPromise;
+  expect(allZonesDownload.suggestedFilename()).toMatch(/^doklad-\d{4}-\d{2}-\d{2}-\d{4}-\d{2}-\d{2}\.pdf$/);
+  const completedReportRequests = reportRequests();
+  expect(completedReportRequests).toHaveLength(2);
+  const priorityRequest = completedReportRequests[0]!;
+  const allZonesRequest = completedReportRequests[1]!;
+  expect(priorityRequest.authorization).toBe('Bearer mock-ui-session');
+  expect(allZonesRequest.authorization).toBe('Bearer mock-ui-session');
+  expect(priorityRequest.url.searchParams.get('zones')).toBe('priority');
+  expect(allZonesRequest.url.searchParams.get('zones')).toBe('all');
+  for (const request of [priorityRequest, allZonesRequest]) {
+    expect(request.url.searchParams.get('from')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(request.url.searchParams.get('to')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(request.url.searchParams.get('from')! <= request.url.searchParams.get('to')!).toBe(true);
+  }
+  expect(allZonesRequest.url.searchParams.get('from')).toBe(priorityRequest.url.searchParams.get('from'));
+  expect(allZonesRequest.url.searchParams.get('to')).toBe(priorityRequest.url.searchParams.get('to'));
 
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: /Оформление/ }).click();
   await page.getByRole('menuitemradio', { name: 'Светлая' }).click();
+  await reportScreenshot('report-all-light-ru');
   await page.keyboard.press('Escape');
   await page.setViewportSize({ width: 320, height: 844 });
   await page.goto('/work');
-  const reportPanel = page.locator('section[aria-labelledby="work-report-title"]');
+  await expect(reportPanel.getByRole('combobox')).toContainText('Красные и жёлтые');
+  await reportScreenshot('report-mobile-320-light-ru-priority');
   const mobileReportButton = reportPanel.getByRole('button', { name: /PDF/ });
   await expect(reportPanel).toBeVisible();
   await expect(mobileReportButton).toBeVisible();
+  const normalPanelBox = await reportPanel.boundingBox();
+  const normalButtonBox = await mobileReportButton.boundingBox();
+  const normalZonesBox = await reportPanel.getByRole('combobox').boundingBox();
+  expect(normalPanelBox).not.toBeNull();
+  expect(normalButtonBox).not.toBeNull();
+  expect(normalZonesBox).not.toBeNull();
+  expect(normalButtonBox!.x).toBeGreaterThanOrEqual(normalPanelBox!.x);
+  expect(normalButtonBox!.x + normalButtonBox!.width).toBeLessThanOrEqual(normalPanelBox!.x + normalPanelBox!.width);
+  expect(normalZonesBox!.x).toBeGreaterThanOrEqual(normalPanelBox!.x);
+  expect(normalZonesBox!.x + normalZonesBox!.width).toBeLessThanOrEqual(normalPanelBox!.x + normalPanelBox!.width);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
   await screenshot(page, 'work-report-mobile-320-light');
 
   const mobileMenu = page.getByRole('button', { name: /Разделы|Бөлімдер/ });
@@ -2032,20 +2080,40 @@ test('work reports and object dossiers download authenticated PDF files', async 
     await mobileMenu.click();
     await page.getByRole('radio', { name: language }).click();
     await page.keyboard.press('Escape');
+    const currentZones = reportPanel.getByRole('combobox');
+    const priorityLabel = language === 'RU' ? 'Красные и жёлтые' : 'Қызыл және сары аймақтар';
+    const allLabel = language === 'RU' ? 'Все объекты' : 'Барлық объектілер';
+    const selectedLabel = language === 'RU' ? priorityLabel : allLabel;
+    await expect(reportPanel.getByText(language === 'RU' ? 'Перечень объектов' : 'Объектілер тізімі')).toBeVisible();
+    await expect(currentZones).toContainText(selectedLabel);
+    await currentZones.click();
+    await expect(page.getByRole('option', { name: priorityLabel, exact: true })).toBeVisible();
+    await expect(page.getByRole('option', { name: allLabel, exact: true })).toBeVisible();
+    if (language === 'RU') {
+      await page.getByRole('option', { name: allLabel, exact: true }).click();
+    } else {
+      await page.keyboard.press('Escape');
+    }
+    await expect(currentZones).toContainText(allLabel);
     await expect(mobileReportButton).toBeVisible();
     const panelBox = await reportPanel.boundingBox();
     const buttonBox = await mobileReportButton.boundingBox();
+    const zonesBox = await currentZones.boundingBox();
     const labelBox = await mobileReportButton.locator('span').boundingBox();
     expect(panelBox).not.toBeNull();
     expect(buttonBox).not.toBeNull();
+    expect(zonesBox).not.toBeNull();
     expect(labelBox).not.toBeNull();
     expect(buttonBox!.x).toBeGreaterThanOrEqual(panelBox!.x);
     expect(buttonBox!.x + buttonBox!.width).toBeLessThanOrEqual(panelBox!.x + panelBox!.width);
+    expect(zonesBox!.x).toBeGreaterThanOrEqual(panelBox!.x);
+    expect(zonesBox!.x + zonesBox!.width).toBeLessThanOrEqual(panelBox!.x + panelBox!.width);
     expect(labelBox!.x).toBeGreaterThanOrEqual(buttonBox!.x);
     expect(labelBox!.x + labelBox!.width).toBeLessThanOrEqual(buttonBox!.x + buttonBox!.width);
     expect(labelBox!.y).toBeGreaterThanOrEqual(buttonBox!.y);
     expect(labelBox!.y + labelBox!.height).toBeLessThanOrEqual(buttonBox!.y + buttonBox!.height);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+    await reportScreenshot(`report-mobile-320-large-${language === 'RU' ? 'ru' : 'kk'}-all`);
     await screenshot(page, `work-report-mobile-320-large-${language === 'RU' ? 'ru' : 'kk'}`);
   }
   await mobileMenu.click();

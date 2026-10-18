@@ -6,14 +6,18 @@ import { downloadFile } from '@/api/client';
 import { errorMessage } from '@/api/queryClient';
 import { formatApiDate } from '@/components/form/dates';
 import { DateInput } from '@/components/form/DateInput';
+import { SelectInput } from '@/components/form/SelectInput';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/lib/toast';
+
+type ReportZones = 'priority' | 'all';
 
 /** "Report to the management": a PDF for a period over the user's own territory. */
 export function ReportCard() {
   const { t } = useTranslation();
   const [from, setFrom] = useState<string | null>(() => formatApiDate(startOfMonth(new Date())));
   const [to, setTo] = useState<string | null>(() => formatApiDate(new Date()));
+  const [zones, setZones] = useState<ReportZones>('priority');
   const [loading, setLoading] = useState(false);
   const reversed = from !== null && to !== null && from > to;
 
@@ -21,7 +25,7 @@ export function ReportCard() {
     if (!from || !to) return;
     setLoading(true);
     try {
-      await downloadFile(`/dashboard/report.pdf?from=${from}&to=${to}`, `doklad-${from}-${to}.pdf`);
+      await downloadFile(`/dashboard/report.pdf?from=${from}&to=${to}&zones=${zones}`, `doklad-${from}-${to}.pdf`);
     } catch (error) {
       toast.error(errorMessage(error), { title: t('error') });
     } finally {
@@ -55,6 +59,16 @@ export function ReportCard() {
           minDate={from ?? undefined}
           className="w-44"
         />
+        <SelectInput
+          label={t('report.zonesLabel')}
+          data={[
+            { value: 'priority', label: t('report.zonesPriority') },
+            { value: 'all', label: t('report.zonesAll') },
+          ]}
+          value={zones}
+          onChange={(value) => setZones(value === 'all' ? 'all' : 'priority')}
+          className="w-full min-w-0 sm:w-52"
+        />
         <Button
           variant="secondary"
           loading={loading}
@@ -66,6 +80,7 @@ export function ReportCard() {
           <span className="min-w-0 text-center">{t('report.button')}</span>
         </Button>
       </div>
+      <p className="m-0 text-xs text-text-3">{t('report.statsHint')}</p>
       {reversed && <p className="m-0 text-xs text-zone-red-ink">{t('report.invalidRange')}</p>}
     </section>
   );
