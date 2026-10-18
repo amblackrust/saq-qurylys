@@ -96,8 +96,7 @@
 
 /* Print the current page content without the AYQYN app shell or interactive controls. */
 @media print {
-  :root,
-  :root.dark {
+  :root {
     color-scheme: light;
     --bg: #fff;
     --surface: #fff;
@@ -113,26 +112,26 @@
     --text-2: #222;
     --text-3: #444;
     --text-disabled: #666;
-    --accent: #087f8c;
-    --accent-hover: #066b76;
-    --accent-text: #000;
+    --accent: #983f55;
+    --accent-hover: #aa4b62;
+    --accent-text: #7c3043;
     --accent-ink: #fff;
     --accent-glow: transparent;
     --link: #000;
     --focus: #000;
-    --zone-green: #16824b;
-    --zone-green-bg: #e8f6ee;
-    --zone-green-ink: #126b3d;
-    --zone-yellow: #a85f00;
-    --zone-yellow-bg: #fff4dc;
-    --zone-yellow-ink: #814900;
-    --zone-red: #c9362b;
+    --zone-green: #466b56;
+    --zone-green-bg: #e7efe8;
+    --zone-green-ink: #365542;
+    --zone-yellow: #806323;
+    --zone-yellow-bg: #f4ecdc;
+    --zone-yellow-ink: #694f1c;
+    --zone-red: #a34f3d;
     --zone-red-action-ink: #ffffff;
-    --zone-red-bg: #fff0ee;
-    --zone-red-ink: #a62d24;
-    --zone-none: #667085;
-    --zone-none-bg: #eef0f3;
-    --zone-none-ink: #475467;
+    --zone-red-bg: #f5e6e0;
+    --zone-red-ink: #7e3c32;
+    --zone-none: #574941;
+    --zone-none-bg: #eee8e1;
+    --zone-none-ink: #51443d;
     --graph-developer: #7154d9;
     --shadow-1: none;
     --shadow-2: none;

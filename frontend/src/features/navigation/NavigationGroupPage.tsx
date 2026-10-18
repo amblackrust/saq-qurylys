@@ -18,7 +18,7 @@ export function NavigationGroupPage() {
     <section aria-label={group.label}>
       <h1 className="text-2xl leading-tight font-medium tracking-[-0.035em] text-text sm:text-3xl">{group.label}</h1>
       <p className="mt-2 max-w-2xl text-sm leading-relaxed text-text-2 sm:text-base">{group.purpose}</p>
-      <nav aria-label={t('nav.groupNavigation', { group: group.label })} className="mt-5 grid grid-cols-12 gap-[clamp(.4rem,.55vw,.65rem)]">
+      <nav id="bento-leaf-navigation" aria-label={t('nav.groupNavigation', { group: group.label })} className="mt-5 grid grid-cols-12 gap-[clamp(.4rem,.55vw,.65rem)]">
         {group.items.map((item, index) => (
           <NavigationTile
             key={item.id}

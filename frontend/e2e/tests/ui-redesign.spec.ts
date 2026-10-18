@@ -4,7 +4,7 @@ import { t, tKk } from '../support/i18n';
 import type { Page, Route } from '@playwright/test';
 import type { ActivityEvent, AdDetail, AdReviewState, Assignment, Assignee, EvidenceMeta, LinkGraph, ObjectDetail, ObjectDocument, Role, SearchResults, SignalDetail, SignalMaterials, SignalRecipient, SignalStatus, User, VisionAsset, VisionFinding, VisionFrame, VisionSessionDetail } from '../../src/api/types';
 
-const screenshotDir = '/tmp/ayqyn-bento';
+const screenshotDir = '/tmp/ayqyn-polish/after';
 const objectRow = {
   id: 7,
   code: 'D-07',
@@ -1001,6 +1001,43 @@ async function screenshot(page: Page, name: string, fullPage = true) {
   await page.screenshot({ path: `${screenshotDir}/${name}.png`, fullPage });
 }
 
+async function expectLightOnly(page: Page) {
+  const root = page.locator('html');
+  await expect(root).toHaveAttribute('data-theme', 'light');
+  await expect(root).toHaveAttribute('data-theme-mode', 'light');
+  expect(await root.evaluate((element) => element.classList.contains('dark'))).toBe(false);
+  await expect(page.getByRole('button', { name: /Оформление/ })).toHaveCount(0);
+}
+
+async function selectLanguage(page: Page, language: 'ru' | 'kk') {
+  await page.getByTestId('header-language-trigger').click();
+  const currentLanguage = await page.locator('html').getAttribute('lang');
+  const selected = page.getByTestId(`header-language-option-${currentLanguage}`);
+  await expect(selected).toHaveAttribute('aria-checked', 'true');
+  const option = page.getByTestId(`header-language-option-${language}`);
+  await option.click();
+  await expect(page.locator('html')).toHaveAttribute('lang', language);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('saq_lang'))).toBe(language);
+}
+
+async function setLargeFont(page: Page, enabled: boolean) {
+  const root = page.locator('html');
+  const current = await root.getAttribute('data-font') === 'large';
+  const trigger = page.getByTestId('header-user-trigger');
+  await trigger.click();
+  const option = page.getByTestId('profile-large-font-item');
+  await expect(option).toHaveAttribute('aria-checked', String(current));
+  if (current !== enabled) await option.click();
+  else await page.keyboard.press('Escape');
+  expect(await root.getAttribute('data-font') === 'large').toBe(enabled);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('saq_font'))).toBe(enabled ? 'large' : null);
+}
+
+async function openAssistantFromProfile(page: Page) {
+  await page.getByTestId('header-user-trigger').click();
+  await page.getByTestId('profile-ask-ai-item').click();
+}
+
 function expectCleanBrowser(harness: Harness) {
   expect(harness.unexpected).toEqual([]);
   expect(harness.pageErrors).toEqual([]);
@@ -1091,7 +1128,7 @@ test('work opens as the operator task queue, links the real next item and suppor
   await page.getByTestId('bento-home-link').click();
   await expect(page).toHaveURL('/home');
 
-  await page.getByText('ҚАЗ', { exact: true }).click();
+  await selectLanguage(page, 'kk');
   await expect(page.locator('html')).toHaveAttribute('lang', 'kk');
   await expect(page.getByRole('main').getByRole('heading', { level: 1, name: tKk('nav.homeTitle') })).toBeVisible();
   await screenshot(page, 'home-operator-kk-desktop');
@@ -1310,16 +1347,16 @@ test('operator work does not use a stale assignment as the main action after its
   await expect.poll(() => harness.assignmentRequests.length).toBeGreaterThan(1);
   const retry = page.getByTestId('work-assignments-card').getByRole('button', { name: t('retry') });
   await expect(retry).toBeVisible();
-  for (const colorScheme of ['light', 'dark'] as const) {
-    await page.emulateMedia({ colorScheme });
-    await expect(page.locator('html')).toHaveAttribute('data-theme', colorScheme);
-    const colors = await retry.evaluate((button) => ({
-      foreground: getComputedStyle(button).color,
-      background: getComputedStyle(button).backgroundColor,
-    }));
-    expect(contrastRatio(colors.foreground, colors.background), `assignment retry contrast in ${colorScheme}`).toBeGreaterThanOrEqual(4.5);
-    await screenshot(page, `work-assignment-error-${colorScheme}`);
-  }
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await expect(page.locator('html')).toHaveAttribute('data-theme-mode', 'light');
+  await expect(page.locator('html')).not.toHaveClass(/dark/);
+  const colors = await retry.evaluate((button) => ({
+    foreground: getComputedStyle(button).color,
+    background: getComputedStyle(button).backgroundColor,
+  }));
+  expect(contrastRatio(colors.foreground, colors.background), 'assignment retry contrast in forced light mode').toBeGreaterThanOrEqual(4.5);
+  await screenshot(page, 'work-assignment-error-light-under-dark-os');
   await retry.focus();
   await expect(retry).toBeFocused();
   await page.keyboard.press('Enter');
@@ -1327,7 +1364,7 @@ test('operator work does not use a stale assignment as the main action after its
   expectCleanBrowser(harness);
 });
 
-test('colored signal-card retry controls stay readable and keyboard reachable in both themes', async ({ page }) => {
+test('colored signal-card retry controls stay readable and keyboard reachable under dark OS settings', async ({ page }) => {
   const harness = await installMocks(page, 'mio_officer', {
     signalListFailures: { returned: { code: 'temporary_failure', message: 'Queue temporarily unavailable' } },
   });
@@ -1337,18 +1374,16 @@ test('colored signal-card retry controls stay readable and keyboard reachable in
   await expect(nextRetry).toBeVisible();
   await expect(signalRetry).toBeVisible();
 
-  for (const colorScheme of ['light', 'dark'] as const) {
-    await page.emulateMedia({ colorScheme });
-    await expect(page.locator('html')).toHaveAttribute('data-theme', colorScheme);
-    for (const retry of [nextRetry, signalRetry]) {
-      const colors = await retry.evaluate((button) => ({
-        foreground: getComputedStyle(button).color,
-        background: getComputedStyle(button).backgroundColor,
-      }));
-      expect(contrastRatio(colors.foreground, colors.background), `signal retry contrast in ${colorScheme}`).toBeGreaterThanOrEqual(4.5);
-    }
-    await screenshot(page, `work-signal-error-${colorScheme}`);
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expectLightOnly(page);
+  for (const retry of [nextRetry, signalRetry]) {
+    const colors = await retry.evaluate((button) => ({
+      foreground: getComputedStyle(button).color,
+      background: getComputedStyle(button).backgroundColor,
+    }));
+    expect(contrastRatio(colors.foreground, colors.background), 'signal retry contrast in forced light mode').toBeGreaterThanOrEqual(4.5);
   }
+  await screenshot(page, 'work-signal-error-light-under-dark-os');
 
   await signalRetry.focus();
   await expect(signalRetry).toBeFocused();
@@ -1471,17 +1506,31 @@ test('Vision creates a fixture session and uploads a supported photo through the
   expect(publishMutation && JSON.parse(publishMutation.body ?? '{}')).toMatchObject({ text: 'Наружная реклама по fixture', object_id: null });
 });
 
-test('light and dark appearance persists; the card navigation fits supported widths', async ({ page }) => {
+test('light-only theme, language dropdown, and profile actions work across supported widths', async ({ page }) => {
   const harness = await installMocks(page, 'mio_officer');
+  await page.addInitScript(() => localStorage.setItem('saq_theme', 'dark'));
+  await page.emulateMedia({ colorScheme: 'dark' });
   await page.goto('/work');
-  const header = page.getByRole('banner');
-  const utilities = page.getByRole('group', { name: 'Действия и настройки' });
-  const appearance = page.getByRole('button', { name: /Оформление/ });
-  const bodyFontSize = await page.evaluate(() => getComputedStyle(document.body).fontSize);
-  expect(bodyFontSize).toBe('16px');
+  await expect(page.getByRole('heading', { name: 'Сегодня' })).toBeVisible();
+  await expectLightOnly(page);
+  expect(await page.evaluate(() => localStorage.getItem('saq_theme'))).toBe('dark');
+  expect(await page.evaluate(() => getComputedStyle(document.body).fontSize)).toBe('16px');
 
-  await page.setViewportSize({ width: 1440, height: 900 });
-  const notificationButton = header.getByRole('button', { name: 'Уведомления' });
+  const header = page.getByRole('banner');
+  const utilities = header.getByRole('group', { name: t('header.utilities') });
+  const profile = page.getByTestId('header-user-trigger');
+  const language = page.getByTestId('header-language-trigger');
+  await expect(language).toContainText('RU');
+  await expect(profile).toBeVisible();
+  const profileBox = await profile.boundingBox();
+  expect(profileBox).not.toBeNull();
+  expect(profileBox!.width).toBeGreaterThanOrEqual(44);
+  expect(profileBox!.height).toBeGreaterThanOrEqual(44);
+  const profileRadius = await profile.evaluate((element) => getComputedStyle(element).borderRadius);
+  const profileRadiusPixels = Number.parseFloat(profileRadius);
+  expect(profileRadiusPixels).toBeGreaterThanOrEqual(Math.min(profileBox!.width, profileBox!.height) / 2);
+
+  const notificationButton = header.getByRole('button', { name: t('header.notifications') });
   await notificationButton.focus();
   await page.keyboard.press('Enter');
   const notificationPanel = page.getByRole('dialog');
@@ -1494,26 +1543,38 @@ test('light and dark appearance persists; the card navigation fits supported wid
   await page.keyboard.press('Escape');
   await expect(notificationPanel).toBeHidden();
   await expect(notificationButton).toBeFocused();
-  const desktopProfile = page.getByRole('button', { name: 'Меню пользователя' }).first();
-  await desktopProfile.focus();
+
+  await profile.focus();
   await page.keyboard.press('Enter');
   const profileMenu = page.getByRole('menu');
   await expect(profileMenu).toBeVisible();
-  const profileBox = await profileMenu.boundingBox();
-  expect(profileBox).not.toBeNull();
-  expect(profileBox!.x).toBeGreaterThanOrEqual(0);
-  expect(profileBox!.x + profileBox!.width).toBeLessThanOrEqual(1440);
-  expect(profileBox!.y + profileBox!.height).toBeLessThanOrEqual(900);
+  const askAi = profileMenu.getByTestId('profile-ask-ai-item');
+  const largeFont = profileMenu.getByTestId('profile-large-font-item');
+  await expect(askAi).toHaveAttribute('role', 'menuitemcheckbox');
+  await expect(largeFont).toHaveAttribute('role', 'menuitemcheckbox');
+  await expect(profileMenu.getByTestId('profile-logout-item')).toBeVisible();
+  await screenshot(page, 'profile-menu-desktop');
+  await askAi.click();
+  const assistant = page.getByRole('complementary', { name: 'Спросить ИИ' });
+  await expect(assistant).toBeVisible();
+  await expect(assistant.getByRole('textbox', { name: 'Сообщение ассистенту' })).toBeFocused();
+  await screenshot(page, 'profile-open-assistant-desktop');
   await page.keyboard.press('Escape');
-  await expect(profileMenu).toBeHidden();
-  await expect(desktopProfile).toBeFocused();
+  await expect(assistant).toBeHidden();
+  await expect(profile).toBeFocused();
+  await setLargeFont(page, true);
+  await page.reload();
+  await expectLightOnly(page);
+  expect(await page.locator('html').getAttribute('data-font')).toBe('large');
+  await setLargeFont(page, false);
 
   for (const width of [320, 390, 768, 1440]) {
     await page.setViewportSize({ width, height: 844 });
     await expect(header).toBeVisible();
     await expect(utilities).toBeVisible();
+    await expectLightOnly(page);
     const measurement = await page.evaluate(() => {
-      const utilityGroup = document.querySelector('header [role="group"][aria-label]');
+      const utilityGroup = document.querySelector<HTMLElement>('header [role="group"][aria-label]');
       if (!utilityGroup) throw new Error('Missing header utilities');
       const visible = (element: Element) => getComputedStyle(element).display !== 'none';
       const targets = Array.from(utilityGroup.querySelectorAll<HTMLElement>('button')).filter((target) => {
@@ -1524,69 +1585,107 @@ test('light and dark appearance persists; the card navigation fits supported wid
       return {
         clientWidth: document.documentElement.clientWidth,
         scrollWidth: document.documentElement.scrollWidth,
-        overflowingElements: Array.from(document.body.querySelectorAll<HTMLElement>('*')).flatMap((element) => {
-          const rect = element.getBoundingClientRect();
-          const style = getComputedStyle(element);
-          if (style.display === 'none' || style.visibility === 'hidden' || rect.width === 0 || rect.height === 0) return [];
-          if (rect.right <= document.documentElement.clientWidth + 1 && rect.left >= -1) return [];
-          return [{ tag: element.tagName, className: String(element.className).slice(0, 80), left: rect.left, right: rect.right, position: style.position, text: element.innerText?.slice(0, 60) }];
-        }).slice(0, 12),
-        utilityTargets: targets.map((target) => {
+        targets: targets.map((target) => {
           const rect = target.getBoundingClientRect();
-          return { width: rect.width, height: rect.height };
+          return { width: rect.width, height: rect.height, right: rect.right };
         }),
       };
     });
-    expect(measurement.scrollWidth, `page must not cause horizontal overflow at ${width}px; elements: ${JSON.stringify(measurement.overflowingElements)}`).toBeLessThanOrEqual(measurement.clientWidth);
-    expect(measurement.utilityTargets.length, `header controls must be present at ${width}px`).toBeGreaterThan(0);
-    for (const target of measurement.utilityTargets) {
-      expect(target.width, `header control target width at ${width}px`).toBeGreaterThanOrEqual(44);
-      expect(target.height, `header control target height at ${width}px`).toBeGreaterThanOrEqual(44);
+    expect(measurement.scrollWidth, `page must not overflow horizontally at ${width}px`).toBeLessThanOrEqual(measurement.clientWidth);
+    expect(measurement.targets.length).toBeGreaterThan(0);
+    for (const target of measurement.targets) {
+      expect(target.width, `header target width at ${width}px`).toBeGreaterThanOrEqual(44);
+      expect(target.height, `header target height at ${width}px`).toBeGreaterThanOrEqual(44);
+      expect(target.right, `header target must fit at ${width}px`).toBeLessThanOrEqual(width + 1);
     }
-    if (width === 1440 || width === 320) await screenshot(page, `layout-${width}`);
+    if (width === 320 || width === 1440) await screenshot(page, `header-layout-${width}`);
+
+    await language.click();
+    const languageMenu = page.getByRole('menu');
+    const ru = languageMenu.getByTestId('header-language-option-ru');
+    const kk = languageMenu.getByTestId('header-language-option-kk');
+    await expect(ru).toHaveAttribute('role', 'menuitemradio');
+    await expect(kk).toHaveAttribute('role', 'menuitemradio');
+    for (const option of [ru, kk]) {
+      const box = await option.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.width).toBeGreaterThanOrEqual(44);
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(width + 1);
+    }
+    await screenshot(page, `language-menu-${width}`);
+    await page.keyboard.press('Escape');
+    await expect(languageMenu).toBeHidden();
+    await expect(language).toBeFocused();
+    if (width === 390) {
+      await profile.focus();
+      await page.keyboard.press('Enter');
+      await expect(profileMenu).toBeVisible();
+      await profileMenu.getByTestId('profile-ask-ai-item').click();
+      const mobileAssistant = page.getByRole('complementary', { name: 'Спросить ИИ' });
+      await expect(mobileAssistant.getByRole('textbox', { name: 'Сообщение ассистенту' })).toBeFocused();
+      await page.keyboard.press('Escape');
+      await expect(mobileAssistant).toBeHidden();
+      await expect(profile).toBeFocused();
+    }
   }
 
-  await appearance.click();
-  await page.getByRole('menuitemradio', { name: 'Тёмная' }).click();
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-  await expect(page.locator('html')).toHaveClass(/dark/);
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('saq_theme'))).toBe('dark');
-  await screenshot(page, 'section-work-dark-1440');
-  await page.getByTestId('bento-home-link').click();
-  await expect(page).toHaveURL('/home');
-  await screenshot(page, 'home-dark-1440');
-  await page.getByTestId('bento-nav-card-tools').click();
-  await expect(page).toHaveURL('/home/tools');
-  await screenshot(page, 'tools-hub-dark-1440');
-  await page.getByTestId('bento-home-link').click();
-  await page.getByTestId('bento-nav-card-explore').click();
-  await expect(page).toHaveURL('/home/explore');
-  await screenshot(page, 'explore-hub-dark-1440');
-  await page.getByTestId('bento-leaf-card-map').click();
-  await expect(page).toHaveURL('/map');
-  await screenshot(page, 'map-section-dark-1440');
-  await page.getByTestId('bento-home-link').click();
-  await expect(page).toHaveURL('/home');
-  await page.reload();
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-
-  await page.getByRole('button', { name: /Оформление/ }).click();
-  await page.getByRole('menuitemradio', { name: 'Светлая' }).click();
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-  await expect(page.locator('html')).not.toHaveClass(/dark/);
-  await page.getByRole('button', { name: /Оформление/ }).click();
-  await page.getByRole('menuitemradio', { name: 'Система' }).click();
-  await page.emulateMedia({ colorScheme: 'dark' });
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-  await page.emulateMedia({ colorScheme: 'light' });
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-
-  await page.setViewportSize({ width: 390, height: 844 });
+  await page.setViewportSize({ width: 320, height: 844 });
   await page.goto('/home');
   const bento = page.getByTestId('bento-navigation');
   await expect(page.locator('aside')).toHaveCount(0);
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await screenshot(page, 'home-mobile-390');
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+  const assertHomeLabelsFit = async (language: 'ru' | 'kk') => {
+    const labels = await bento.locator('nav[aria-label]').first().locator('[data-testid^="bento-nav-card-"]').evaluateAll((links) =>
+      links.map((link) => {
+        const article = link.closest('article');
+        const label = link.querySelector<HTMLElement>(':scope > span:nth-of-type(2) > span');
+        if (!article || !label) return { id: link.getAttribute('data-testid'), missing: true, textRight: 0, cardRight: 0, scrollWidth: 0, clientWidth: 0, wordRectCounts: [] };
+        const cardBounds = article.getBoundingClientRect();
+        const textBounds = label.getBoundingClientRect();
+        const textNode = label.firstChild;
+        const text = textNode?.textContent ?? '';
+        const wordRectCounts = textNode?.nodeType === Node.TEXT_NODE
+          ? Array.from(text.matchAll(/\S+/g), (match) => {
+            const range = document.createRange();
+            const start = match.index ?? 0;
+            range.setStart(textNode, start);
+            range.setEnd(textNode, start + match[0].length);
+            return range.getClientRects().length;
+          })
+          : [];
+        return { id: link.getAttribute('data-testid'), missing: false, textRight: textBounds.right, cardRight: cardBounds.right, scrollWidth: label.scrollWidth, clientWidth: label.clientWidth, wordRectCounts };
+      }),
+    );
+    expect(labels.length, `${language} home must render role-available navigation cards`).toBeGreaterThan(0);
+    for (const label of labels) {
+      expect(label.missing, `${language} ${label.id} title must be in the tile`).toBe(false);
+      if (!label.missing) {
+        expect(label.textRight, `${language} ${label.id} title must fit its tile`).toBeLessThanOrEqual(label.cardRight + 1);
+        expect(label.scrollWidth, `${language} ${label.id} title words must wrap`).toBeLessThanOrEqual(label.clientWidth + 1);
+        expect(label.wordRectCounts.length, `${language} ${label.id} title words must be measurable`).toBeGreaterThan(0);
+        for (const rectCount of label.wordRectCounts) {
+          expect(rectCount, `${language} ${label.id} title must wrap between words, never through a word`).toBe(1);
+        }
+      }
+    }
+  };
+  await selectLanguage(page, 'ru');
+  await assertHomeLabelsFit('ru');
+  await screenshot(page, 'home-mobile-320-ru');
+  for (const width of [768, 1024, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await assertHomeLabelsFit('ru');
+    if (width === 1024 || width === 1440) await screenshot(page, `home-desktop-${width}-ru`);
+  }
+  await page.setViewportSize({ width: 320, height: 844 });
+  await selectLanguage(page, 'kk');
+  await assertHomeLabelsFit('kk');
+  await screenshot(page, 'home-mobile-320-kk');
+  await selectLanguage(page, 'ru');
+  await page.setViewportSize({ width: 390, height: 844 });
   const homeExplore = bento.getByTestId('bento-nav-card-explore');
   await homeExplore.focus();
   await page.keyboard.press('Enter');
@@ -1601,101 +1700,27 @@ test('light and dark appearance persists; the card navigation fits supported wid
   await expect(page).toHaveURL('/home/explore');
   await page.getByTestId('bento-home-link').click();
   await expect(page).toHaveURL('/home');
-
   await page.setViewportSize({ width: 320, height: 844 });
-  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
-  await page.evaluate(() => window.scrollTo(0, 0));
-  await screenshot(page, 'home-mobile-320');
-  const assertHomeLabelsFit = async (language: string) => {
-    const labels = await bento.locator('nav[aria-label]').first().locator('[data-testid^="bento-nav-card-"]').evaluateAll((links) =>
-      links.map((link) => {
-        const article = link.closest('article');
-        const label = link.querySelector<HTMLElement>(':scope > span:nth-of-type(2) > span');
-        if (!article || !label) return { id: link.getAttribute('data-testid'), missing: true, textRight: 0, cardRight: 0, scrollWidth: 0, clientWidth: 0 };
-        const cardBounds = article.getBoundingClientRect();
-        const textBounds = label.getBoundingClientRect();
-        return {
-          id: link.getAttribute('data-testid'),
-          missing: false,
-          textRight: textBounds.right,
-          cardRight: cardBounds.right,
-          scrollWidth: label.scrollWidth,
-          clientWidth: label.clientWidth,
-        };
-      }),
-    );
-    expect(labels.length, `${language} home must render role-available navigation cards`).toBeGreaterThan(0);
-    for (const label of labels) {
-      expect(label.missing, `${language} ${label.id} title must be in the tile`).toBe(false);
-      if (!label.missing) {
-        expect(label.textRight, `${language} ${label.id} title must fit its tile`).toBeLessThanOrEqual(label.cardRight + 1);
-        expect(label.scrollWidth, `${language} ${label.id} title words must wrap`).toBeLessThanOrEqual(label.clientWidth + 1);
-      }
-    }
-  };
-  await assertHomeLabelsFit('RU');
-
-  const languageTargets = header.getByRole('radio', { name: /^(RU|ҚАЗ)$/ });
-  await expect(languageTargets).toHaveCount(2);
-  for (const target of await languageTargets.all()) {
-    const box = await target.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.width).toBeGreaterThanOrEqual(44);
-    expect(box!.height).toBeGreaterThanOrEqual(44);
-    expect(box!.x).toBeGreaterThanOrEqual(0);
-    expect(box!.x + box!.width).toBeLessThanOrEqual(320);
-  }
-  const mobileProfile = header.getByRole('button', { name: 'Меню пользователя' });
-  await mobileProfile.focus();
-  await page.keyboard.press('Enter');
-  await expect(profileMenu).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(profileMenu).toBeHidden();
-  await expect(mobileProfile).toBeFocused();
-  const kazakh = header.getByRole('radio', { name: 'ҚАЗ' });
-  await kazakh.click();
-  await expect(page.locator('html')).toHaveAttribute('lang', 'kk');
-  await expect(kazakh).toHaveAttribute('aria-checked', 'true');
-  await assertHomeLabelsFit('KK');
-  await page.evaluate(() => window.scrollTo(0, 0));
-  await screenshot(page, 'home-mobile-320-kk');
-  await header.getByRole('radio', { name: 'RU' }).click();
-  await expect(page.locator('html')).toHaveAttribute('lang', 'ru');
-  await expect(header.getByRole('button', { name: 'Уведомления' })).toBeVisible();
-
-  await page.addInitScript(() => {
-    const getItem = Storage.prototype.getItem;
-    const setItem = Storage.prototype.setItem;
-    Storage.prototype.getItem = function (key: string) {
-      if (key === 'saq_theme') throw new DOMException('Storage blocked', 'SecurityError');
-      return getItem.call(this, key);
-    };
-    Storage.prototype.setItem = function (key: string, value: string) {
-      if (key === 'saq_theme') throw new DOMException('Storage blocked', 'SecurityError');
-      return setItem.call(this, key, value);
-    };
-  });
-  await page.emulateMedia({ colorScheme: 'dark' });
-  await page.reload();
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.getByRole('button', { name: /Оформление/ }).click();
-  await page.getByRole('menuitemradio', { name: 'Светлая' }).click();
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-  await page.getByRole('button', { name: /Оформление/ }).click();
-  await page.getByRole('menuitemradio', { name: 'Система' }).click();
-  await page.emulateMedia({ colorScheme: 'dark' });
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await selectLanguage(page, 'kk');
+  await expect(page.getByRole('heading', { name: tKk('nav.homeTitle') })).toBeVisible();
+  await screenshot(page, 'home-kazakh-320');
+  await selectLanguage(page, 'ru');
+  await expectLightOnly(page);
+  expect(harness.mutations).toEqual([]);
+  expectCleanBrowser(harness);
 
   const browser = page.context().browser();
-  if (!browser) throw new Error('Missing browser for login theme screenshots');
-  const loginContext = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light', locale: 'ru-RU' });
+  if (!browser) throw new Error('Missing browser for light-only login screenshots');
+  const loginContext = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark', locale: 'ru-RU' });
   try {
     const loginPage = await loginContext.newPage();
+    await loginPage.route('**/api/v1/**', (route) => route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ detail: 'Unauthenticated' }) }));
+    await loginPage.addInitScript(() => localStorage.setItem('saq_theme', 'dark'));
     await loginPage.goto(new URL('/login', page.url()).toString());
     await expect(loginPage.getByRole('heading', { name: 'Вход в систему' })).toBeVisible();
     await expect(loginPage).toHaveTitle('AYQYN');
     await expect(loginPage.getByText('AYQYN', { exact: true })).toBeVisible();
+    await expectLightOnly(loginPage);
     const faviconHref = await loginPage.locator('link[rel="icon"]').getAttribute('href');
     expect(faviconHref).toBe('/ayqyn-mark.svg');
     const faviconResponse = await loginPage.request.get(new URL(faviconHref!, loginPage.url()).toString());
@@ -1706,57 +1731,32 @@ test('light and dark appearance persists; the card navigation fits supported wid
       { width: 320, height: 600 },
       { width: 320, height: 844 },
       { width: 390, height: 844 },
+      { width: 768, height: 900 },
       { width: 1440, height: 900 },
     ]) {
       await loginPage.setViewportSize({ width, height });
-      const appearanceButton = loginPage.getByRole('button', { name: /Оформление/ });
-      const languageGroup = loginPage.getByRole('radiogroup', { name: 'Язык' });
-      for (const theme of ['Светлая', 'Тёмная'] as const) {
-        await appearanceButton.click();
-        await loginPage.getByRole('menuitemradio', { name: theme }).click();
-        await expect(loginPage.locator('html')).toHaveAttribute('data-theme', theme === 'Тёмная' ? 'dark' : 'light');
-
-        const appearanceBox = await appearanceButton.boundingBox();
-        const languageBox = await languageGroup.boundingBox();
-        const brandBox = await loginPage.locator('img[src="/ayqyn-mark.svg"]').boundingBox();
-        expect(appearanceBox, `appearance control must be visible at ${width}px in ${theme} mode`).not.toBeNull();
-        expect(languageBox, `language control must be visible at ${width}px in ${theme} mode`).not.toBeNull();
-        expect(brandBox, `brand mark must be visible at ${width}px in ${theme} mode`).not.toBeNull();
-        expect(appearanceBox!.x).toBeGreaterThanOrEqual(0);
-        expect(appearanceBox!.x + appearanceBox!.width).toBeLessThanOrEqual(width);
-        expect(appearanceBox!.y).toBeGreaterThanOrEqual(0);
-        expect(languageBox!.x).toBeGreaterThanOrEqual(0);
-        expect(languageBox!.x + languageBox!.width).toBeLessThanOrEqual(width);
-        expect(languageBox!.y + languageBox!.height).toBeLessThanOrEqual(height);
-        const separated = appearanceBox!.x + appearanceBox!.width <= languageBox!.x
-          || languageBox!.x + languageBox!.width <= appearanceBox!.x
-          || appearanceBox!.y + appearanceBox!.height <= languageBox!.y
-          || languageBox!.y + languageBox!.height <= appearanceBox!.y;
-        expect(separated, `appearance and language controls must not overlap at ${width}px in ${theme} mode`).toBe(true);
-        if (width <= 390) {
-          expect(appearanceBox!.y + appearanceBox!.height).toBeLessThanOrEqual(brandBox!.y);
-          expect(languageBox!.y + languageBox!.height).toBeLessThanOrEqual(brandBox!.y);
-        }
-        for (const languageTarget of await languageGroup.getByRole('radio').all()) {
-          const box = await languageTarget.boundingBox();
-          expect(box).not.toBeNull();
-          expect(box!.width).toBeGreaterThanOrEqual(44);
-          expect(box!.height).toBeGreaterThanOrEqual(44);
-          expect(box!.x).toBeGreaterThanOrEqual(0);
-          expect(box!.x + box!.width).toBeLessThanOrEqual(width);
-        }
-        await screenshot(loginPage, `login-${theme === 'Тёмная' ? 'dark' : 'light'}-${width}-${height}`);
-      }
+      await expectLightOnly(loginPage);
+      const languageTrigger = loginPage.getByTestId('header-language-trigger');
+      const brand = loginPage.locator('img[src="/ayqyn-mark.svg"]');
+      const triggerBox = await languageTrigger.boundingBox();
+      const brandBox = await brand.boundingBox();
+      expect(triggerBox).not.toBeNull();
+      expect(brandBox).not.toBeNull();
+      expect(triggerBox!.x).toBeGreaterThanOrEqual(0);
+      expect(triggerBox!.x + triggerBox!.width).toBeLessThanOrEqual(width);
+      expect(triggerBox!.y + triggerBox!.height).toBeLessThanOrEqual(height);
+      await languageTrigger.click();
+      await expect(loginPage.getByTestId('header-language-option-ru')).toBeVisible();
+      await screenshot(loginPage, `login-language-${width}`);
+      await loginPage.keyboard.press('Escape');
+      await expect(languageTrigger).toBeFocused();
     }
   } finally {
     await loginContext.close();
   }
-
-  expect(harness.mutations).toEqual([]);
-  expectCleanBrowser(harness);
 });
 
-test('map filters by zone, selects a real object and opens its dossier in light and dark', async ({ page }) => {
+test('map filters by zone, selects a real object and opens its dossier under dark OS settings', async ({ page }) => {
   const harness = await installMocks(page, 'mio_officer');
   await page.route('https://tiles.openfreemap.org/styles/**', (route) => route.fulfill({
     contentType: 'application/json',
@@ -1771,10 +1771,9 @@ test('map filters by zone, selects a real object and opens its dossier in light 
   await expect(page.getByRole('main').getByRole('heading', { name: 'Карта объектов' })).toBeVisible();
   await screenshot(page, 'map-light-1440');
 
-  await page.getByRole('button', { name: /Оформление/ }).click();
-  await page.getByRole('menuitemradio', { name: 'Тёмная' }).click();
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-  await screenshot(page, 'map-dark-1440');
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expectLightOnly(page);
+  await screenshot(page, 'map-light-under-dark-os-1440');
 
   const zones = page.getByRole('group', { name: /Количество объектов по зонам/ });
   const yellow = zones.getByRole('button').nth(1);
@@ -1800,10 +1799,9 @@ test('graph search selects an object node and opens its real dossier', async ({ 
   await expect(page.getByRole('region', { name: 'Граф связей' })).toBeVisible();
   await screenshot(page, 'graph-light-1440');
 
-  await page.getByRole('button', { name: /Оформление/ }).click();
-  await page.getByRole('menuitemradio', { name: 'Тёмная' }).click();
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-  await screenshot(page, 'graph-dark-1440');
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expectLightOnly(page);
+  await screenshot(page, 'graph-light-under-dark-os-1440');
 
   await page.getByRole('textbox', { name: 'Поиск в графе' }).fill('Северный бриз');
   await page.getByRole('button', { name: 'ЖК Северный бриз Объект (цвет — зона)' }).click();
@@ -1881,7 +1879,15 @@ test('activity notification opens below the sticky header and navigates to its e
 
 test('mobile object next-step anchors clear the sticky header and available signal action is explicit', async ({ page }) => {
   const longName = `ЖК Северный бриз — ${'очень длинное название объекта '.repeat(5)}`;
-  const harness = await installMocks(page, 'mio_officer', { object: makeObject('yellow', longName) });
+  const harness = await installMocks(page, 'mio_officer', { object: makeObject('yellow', longName), assignments: [makeAssignment()] });
+  let assignmentsResolved = false;
+  await page.route('**/api/v1/objects/7/assignments', async (route) => {
+    if (route.request().method() === 'GET') {
+      await page.waitForTimeout(1200);
+      assignmentsResolved = true;
+    }
+    await route.fallback();
+  });
   const measures: Array<{ width: number; headerBottom: number; targetTop: number; gap: number }> = [];
 
   for (const width of [390, 320]) {
@@ -1910,6 +1916,29 @@ test('mobile object next-step anchors clear the sticky header and available sign
     expect.soft(pageWidth.scroll, `long object names must not cause horizontal overflow at ${width}px`).toBeLessThanOrEqual(pageWidth.inner);
     if (width === 390) await screenshot(page, 'object-mobile-390-risk');
   }
+
+  await page.setViewportSize({ width: 320, height: 844 });
+  assignmentsResolved = false;
+  const assignmentsResponse = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/objects/7/assignments');
+  await page.goto('/objects/7#risk');
+  const riskTarget = page.locator('#risk');
+  await expect(riskTarget).toBeVisible();
+  expect(assignmentsResolved).toBe(false);
+  const initialRiskBox = await riskTarget.boundingBox();
+  expect(initialRiskBox).not.toBeNull();
+  await assignmentsResponse;
+  await expect.poll(() => assignmentsResolved).toBe(true);
+  await expect.poll(async () => {
+    const [headerBottom, riskTop] = await page.evaluate(() => [
+      document.querySelector('header')?.getBoundingClientRect().bottom ?? Infinity,
+      document.querySelector('#risk')?.getBoundingClientRect().top ?? -Infinity,
+    ]);
+    return riskTop - headerBottom;
+  }).toBeGreaterThanOrEqual(0);
+  const settledRiskBox = await riskTarget.boundingBox();
+  expect(settledRiskBox).not.toBeNull();
+  expect(settledRiskBox!.y).toBeLessThan(844);
+  await screenshot(page, 'object-mobile-320-cold-risk-after-assignments');
 
   await writeFile(`${screenshotDir}/object-anchor-offsets.json`, JSON.stringify(measures, null, 2));
   await test.info().attach('object-anchor-offsets.json', {
@@ -2086,14 +2115,17 @@ test('registry response load failure offers a working retry', async ({ page }) =
     evidenceContents: {
       5401: { contentType: 'application/json', body: registryResponseJson('ЖК Повторная проверка', 'ГАРАНТИЯ-ТЕСТ-003') },
     },
-    evidenceFailures: { 5401: 4 },
+    evidenceFailures: { 5401: 2 },
   });
   await page.goto('/objects/7');
   await page.getByRole('button', { name: 'Открыть сохранённые сведения из реестра' }).click();
   const dialog = page.getByRole('dialog', { name: 'Сведения из реестра' });
   await expect(dialog.getByRole('alert')).toContainText('Не удалось загрузить сохранённый ответ. Повторите попытку или скачайте оригинал.');
+  const evidenceRequests = () => harness.evidenceRequests.filter((request) => request.id === 5401);
+  await expect.poll(() => evidenceRequests().length).toBe(2);
   await dialog.getByRole('button', { name: 'Повторить загрузку' }).click();
   await expect(dialog.getByText('ЖК Повторная проверка', { exact: true })).toBeVisible();
+  expect(evidenceRequests()).toHaveLength(3);
   expect(harness.evidenceRequests.every((request) => request.authorization === 'Bearer mock-ui-session')).toBe(true);
   expect(harness.mutations).toEqual([]);
   harness.expectedCancelledEvidenceIds.add(5401);
@@ -2375,7 +2407,7 @@ test('signal filter group headings stay localized for registry and recipient rol
     await expect(page.getByText(t(`signals:list.filters.groups.${group}`), { exact: true })).toBeVisible();
   }
   await expect(page.getByText(/list\.filters\.groups\./)).toHaveCount(0);
-  await page.getByText('ҚАЗ', { exact: true }).click();
+  await selectLanguage(page, 'kk');
   for (const group of ['action', 'waiting', 'history']) {
     await expect(page.getByText(tKk(`signals:list.filters.groups.${group}`), { exact: true })).toBeVisible();
   }
@@ -2649,14 +2681,14 @@ test('registry staff can review and download a signal package without changing t
   expect(harness.mutations).toEqual([]);
 
   await dialog.getByRole('button', { name: 'Закрыть' }).last().click();
-  await page.getByRole('button', { name: /Оформление/ }).click();
-  await page.getByRole('menuitemradio', { name: 'Тёмная' }).click();
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expectLightOnly(page);
   await openPackage.click();
   await expect(dialog).toBeVisible();
-  await screenshot(page, 'signal-package-dialog-dark', false);
+  await screenshot(page, 'signal-package-dialog-light-under-dark-os', false);
   await dialog.getByRole('button', { name: 'Закрыть' }).last().click();
 
-  await page.getByText('ҚАЗ', { exact: true }).click();
+  await selectLanguage(page, 'kk');
   await expect(page.locator('html')).toHaveAttribute('lang', 'kk');
   await page.getByRole('button', { name: 'Пакетті дайындау' }).click();
   const kkDialog = page.getByRole('dialog', { name: 'Материалдар пакетін дайындау' });
@@ -2676,17 +2708,13 @@ test('registry staff can review and download a signal package without changing t
   expect(packageRequests()[3]?.url.searchParams.get('include_evidence')).toBe('false');
   expect(harness.state.signal.status).toBe('requires_confirmation');
   expect(harness.mutations).toEqual([]);
-  await screenshot(page, 'signal-package-dialog-dark-kk-error', false);
+  await screenshot(page, 'signal-package-dialog-light-kk-error', false);
   await kkDialog.getByRole('button', { name: 'Жабу' }).last().click();
 
-  await page.getByText('RU', { exact: true }).click();
+  await selectLanguage(page, 'ru');
   await expect(page.locator('html')).toHaveAttribute('lang', 'ru');
-  await page.getByRole('button', { name: /Оформление/ }).click();
-  await page.getByRole('menuitemradio', { name: 'Светлая' }).click();
   await page.setViewportSize({ width: 320, height: 844 });
-  const largeFontButton = page.getByRole('button', { name: 'Крупный шрифт' });
-  await largeFontButton.click();
-  await expect(largeFontButton).toHaveAttribute('aria-pressed', 'true');
+  await setLargeFont(page, true);
   await openPackage.click();
   await expect(dialog).toBeVisible();
   const mobileBox = await dialog.boundingBox();
@@ -2839,8 +2867,8 @@ test.describe('Ask AI panel', () => {
   test('opens from the header with page starters, takes focus and returns it on Escape', async ({ page }) => {
     const harness = await installMocks(page, 'mio_officer');
     await page.goto('/objects/7');
-    const opener = page.getByRole('button', { name: panelName });
-    await opener.click();
+    const opener = page.getByTestId('header-user-trigger');
+    await openAssistantFromProfile(page);
     const panel = page.getByRole('complementary', { name: panelName });
     await expect(panel).toBeVisible();
     await expect(panel.getByRole('heading', { level: 2, name: /^(Доброе утро|Добрый день|Добрый вечер)\.$/ })).toBeVisible();
@@ -2849,7 +2877,12 @@ test.describe('Ask AI panel', () => {
     await expect(panel.getByRole('button', { name: /Какие документы проверить\?/ })).toBeVisible();
     await expect(panel.getByText('Объект № 7')).toBeVisible();
     await expect(panel.getByText('ИИ может ошибаться. Проверяйте данные в карточках.')).toBeVisible();
-    await expect(panel.getByRole('textbox', { name: 'Сообщение ассистенту' })).toBeFocused();
+    const composer = panel.getByRole('textbox', { name: 'Сообщение ассистенту' });
+    await expect(composer).toBeFocused();
+    const composerRadius = await composer.locator('..').evaluate((frame) =>
+      Number.parseFloat(getComputedStyle(frame).borderTopLeftRadius),
+    );
+    expect(composerRadius).toBeGreaterThanOrEqual(12);
     await screenshot(page, 'assistant-empty-desktop');
 
     await page.keyboard.press('Escape');
@@ -2861,7 +2894,7 @@ test.describe('Ask AI panel', () => {
   test('a starter sends the page entity and language; the markdown answer links navigate without reload', async ({ page }) => {
     const harness = await installMocks(page, 'mio_officer');
     await page.goto('/objects/7');
-    await page.getByRole('button', { name: panelName }).click();
+    await openAssistantFromProfile(page);
     const panel = page.getByRole('complementary', { name: panelName });
     await panel.getByRole('button', { name: /Почему у объекта такая зона\?/ }).click();
 
@@ -2896,7 +2929,7 @@ test.describe('Ask AI panel', () => {
   test('keeps the conversation after reload, lists it and starts a new one', async ({ page }) => {
     await installMocks(page, 'mio_officer');
     await page.goto('/work');
-    await page.getByRole('button', { name: panelName }).click();
+    await openAssistantFromProfile(page);
     const panel = page.getByRole('complementary', { name: panelName });
     await panel.getByRole('button', { name: /С чего начать день\?/ }).click();
     await expect(panel.getByText('жёлтой', { exact: true })).toBeVisible();
@@ -2929,7 +2962,7 @@ test.describe('Ask AI panel', () => {
   test('Enter sends, Shift+Enter adds a line, the page chip can be removed for one message', async ({ page }) => {
     const harness = await installMocks(page, 'mio_officer');
     await page.goto('/ads?ad=11');
-    await page.getByRole('button', { name: panelName }).click();
+    await openAssistantFromProfile(page);
     const panel = page.getByRole('complementary', { name: panelName });
     await expect(panel.getByText('Объявление № 11')).toBeVisible();
     await expect(panel.getByRole('button', { name: /Как подтвердить находки ИИ\?/ })).toBeVisible();
@@ -2952,7 +2985,7 @@ test.describe('Ask AI panel', () => {
     const failed = sse([{ type: 'delta', text: 'Начало' }, { type: 'error', code: 'llm_unavailable', message: 'down' }]);
     const harness = await installMocks(page, 'mio_officer', { assistantReplies: [failed] });
     await page.goto('/work');
-    await page.getByRole('button', { name: panelName }).click();
+    await openAssistantFromProfile(page);
     const panel = page.getByRole('complementary', { name: panelName });
     await panel.getByRole('button', { name: /С чего начать день\?/ }).click();
     await expect(panel.getByRole('alert')).toContainText('Языковая модель сейчас недоступна');
@@ -2968,7 +3001,7 @@ test.describe('Ask AI panel', () => {
     const cut = sse([{ type: 'delta', text: 'Начало' }]);
     const harness = await installMocks(page, 'mio_officer', { assistantReplies: [cut] });
     await page.goto('/work');
-    await page.getByRole('button', { name: panelName }).click();
+    await openAssistantFromProfile(page);
     const panel = page.getByRole('complementary', { name: panelName });
     await panel.getByRole('button', { name: /С чего начать день\?/ }).click();
     await expect(panel.getByRole('alert')).toContainText('Связь прервалась');
@@ -2981,7 +3014,7 @@ test.describe('Ask AI panel', () => {
   test('Stop aborts the stream and keeps the answer marked as stopped', async ({ page }) => {
     const harness = await installMocks(page, 'mio_officer', { assistantHangs: true });
     await page.goto('/signals');
-    await page.getByRole('button', { name: panelName }).click();
+    await openAssistantFromProfile(page);
     const panel = page.getByRole('complementary', { name: panelName });
     await panel.getByRole('button', { name: /Как отправить карточку в ГАСК\?/ }).click();
     await panel.getByRole('button', { name: 'Остановить' }).click();
@@ -2995,7 +3028,8 @@ test.describe('Ask AI panel', () => {
     const harness = await installMocks(page, 'mio_officer', { assistantEnabled: false });
     await page.goto('/work');
     await expect(page.getByRole('group', { name: 'Действия и настройки' })).toBeVisible();
-    await expect(page.getByRole('button', { name: panelName })).toHaveCount(0);
+    await page.getByTestId('header-user-trigger').click();
+    await expect(page.getByTestId('profile-ask-ai-item')).toHaveCount(0);
     await expect(page.getByRole('complementary', { name: panelName })).toHaveCount(0);
     expect(harness.unexpected).toEqual([]);
     expect(harness.pageErrors).toEqual([]);
@@ -3005,11 +3039,17 @@ test.describe('Ask AI panel', () => {
     const harness = await installMocks(page, 'mio_officer');
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/work');
-    const opener = page.getByRole('button', { name: panelName });
-    await opener.click();
+    const opener = page.getByTestId('header-user-trigger');
+    await openAssistantFromProfile(page);
     const panel = page.getByRole('complementary', { name: panelName });
     await expect(panel).toBeVisible();
     expect(await panel.boundingBox()).toMatchObject({ x: 0, y: 0, width: 390, height: 844 });
+    const composer = panel.getByRole('textbox', { name: 'Сообщение ассистенту' });
+    await expect(composer).toBeFocused();
+    const composerRadius = await composer.locator('..').evaluate((frame) =>
+      Number.parseFloat(getComputedStyle(frame).borderTopLeftRadius),
+    );
+    expect(composerRadius).toBeGreaterThanOrEqual(12);
     await screenshot(page, 'assistant-empty-mobile');
     await panel.getByRole('button', { name: /С чего начать день\?/ }).click();
     await expect(panel.getByText('жёлтой', { exact: true })).toBeVisible();
@@ -3017,7 +3057,7 @@ test.describe('Ask AI panel', () => {
     await panel.getByRole('link', { name: 'ЖК Северный бриз' }).click();
     await expect(page).toHaveURL(/\/objects\/7$/);
     await expect(panel).toBeHidden();
-    await opener.click();
+    await openAssistantFromProfile(page);
     await panel.getByRole('button', { name: 'Закрыть' }).click();
     await expect(panel).toBeHidden();
     await expect(opener).toBeFocused();
@@ -3030,6 +3070,11 @@ test('global search opens object and signal results on desktop and stays inside 
   await page.goto('/work');
   const search = page.getByRole('combobox', { name: 'Глобальный поиск' });
   await expect(search).toBeVisible();
+  const searchPill = search.locator('xpath=..');
+  const searchBox = await searchPill.boundingBox();
+  expect(searchBox).not.toBeNull();
+  const searchRadius = await searchPill.evaluate((element) => Number.parseFloat(getComputedStyle(element).borderTopLeftRadius));
+  expect(searchRadius).toBeGreaterThanOrEqual(searchBox!.height / 2);
   const focusBeforeShortcut = await page.evaluate(() => ({
     tag: document.activeElement?.tagName ?? null,
     testId: document.activeElement instanceof HTMLElement ? document.activeElement.dataset.testid ?? null : null,
@@ -3052,8 +3097,8 @@ test('global search opens object and signal results on desktop and stays inside 
   await expect(unlinkedDeveloper).toHaveAttribute('aria-disabled', 'true');
   const signal = page.getByRole('option', { name: /SIG-2026-0042/ });
   await screenshot(page, 'global-search-desktop-light');
-  await page.getByRole('button', { name: /Оформление/ }).click();
-  await page.getByRole('menuitemradio', { name: 'Тёмная' }).click();
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expectLightOnly(page);
   await search.focus();
   await expect(listbox).toBeVisible();
   await screenshot(page, 'global-search-desktop-dark');
@@ -3063,13 +3108,21 @@ test('global search opens object and signal results on desktop and stays inside 
   await search.press('Enter');
   await expect(page).toHaveURL(/\/signals\/42$/);
 
-  await page.getByRole('button', { name: /Оформление/ }).click();
-  await page.getByRole('menuitemradio', { name: 'Светлая' }).click();
+  await expectLightOnly(page);
   await page.setViewportSize({ width: 320, height: 844 });
   await page.goto('/work');
   const mobileSearch = page.getByRole('combobox', { name: 'Глобальный поиск' });
   await mobileSearch.fill('ЖК');
   await expect(page.getByRole('group', { name: 'Объекты' })).toBeVisible();
+  const mobileObjectResult = page.getByRole('group', { name: 'Объекты' }).getByRole('option', { name: /ЖК Северный бриз/ });
+  await expect(mobileObjectResult).toBeVisible();
+  const resultText = await mobileObjectResult.locator('span').first().evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+    text: element.textContent,
+  }));
+  expect(resultText.text).toContain('ЖК Северный бриз');
+  expect(resultText.scrollWidth).toBeLessThanOrEqual(resultText.clientWidth + 1);
   const mobileInputGroupBox = await mobileSearch.locator('xpath=..').boundingBox();
   const mobileSearchRowBox = await mobileSearch.locator('xpath=../..').boundingBox();
   const mobileListBox = await listbox.boundingBox();
@@ -3120,9 +3173,11 @@ test('registry staff can filter assignments and task authors and assignees get t
   await expect(page.getByRole('heading', { level: 2, name: 'Мои поручения' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Все поручения на контроле' })).toHaveAttribute('href', '/control');
   await screenshot(page, 'work-assignments-light');
-  await page.getByRole('button', { name: /Оформление/ }).click();
-  await page.getByRole('menuitemradio', { name: 'Тёмная' }).click();
-  await screenshot(page, 'work-assignments-dark');
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expectLightOnly(page);
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expectLightOnly(page);
+  await screenshot(page, 'work-assignments-light-under-dark-os');
   const mine = page.getByRole('listitem').filter({ hasText: assigneeTask.task });
   await expect(mine.getByRole('button', { name: 'Отметить выполненным' })).toBeVisible();
   await expect(mine.getByRole('button', { name: 'Отменить поручение' })).toHaveCount(0);
@@ -3133,17 +3188,18 @@ test('registry staff can filter assignments and task authors and assignees get t
   await expect(page.getByRole('row').filter({ hasText: assigneeTask.task })).toBeVisible();
   await expect(page.getByRole('row').filter({ hasText: authorTask.task })).toHaveCount(0);
   expect(harness.assignmentRequests.some((url) => url.searchParams.get('overdue') === 'true')).toBe(true);
-  await screenshot(page, 'control-assignments-dark');
-  await page.getByRole('button', { name: /Оформление/ }).click();
-  await page.getByRole('menuitemradio', { name: 'Светлая' }).click();
+  await expectLightOnly(page);
+  await screenshot(page, 'control-assignments-light-under-dark-os');
+  await expectLightOnly(page);
   await screenshot(page, 'control-assignments-light');
 
   await page.goto('/objects/7#assignments');
   await expect(page.getByRole('heading', { name: 'Поручения' })).toBeVisible();
   await screenshot(page, 'object-assignments-light');
-  await page.getByRole('button', { name: /Оформление/ }).click();
-  await page.getByRole('menuitemradio', { name: 'Тёмная' }).click();
-  await screenshot(page, 'object-assignments-dark');
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expectLightOnly(page);
+  await expectLightOnly(page);
+  await screenshot(page, 'object-assignments-light-under-dark-os');
   const assigneeItem = page.getByRole('listitem').filter({ hasText: assigneeTask.task });
   const authorItem = page.getByRole('listitem').filter({ hasText: authorTask.task });
   await expect(assigneeItem.getByRole('button', { name: 'Отметить выполненным' })).toBeVisible();
@@ -3291,9 +3347,7 @@ test('work reports and object dossiers download authenticated PDF files', async 
   const reportPanel = page.locator('section[aria-labelledby="work-report-title"]');
   const reportZones = reportPanel.getByRole('combobox');
   const reportScreenshot = async (name: string) => {
-    const dir = '/tmp/report-objects';
-    await mkdir(dir, { recursive: true });
-    await page.screenshot({ path: `${dir}/${name}.png`, fullPage: true });
+    await screenshot(page, name);
   };
 
   await page.locator('details').filter({ hasText: t('work.openReport') }).locator('summary').click();
@@ -3309,15 +3363,15 @@ test('work reports and object dossiers download authenticated PDF files', async 
   const priorityRequests = reportRequests();
   expect(priorityRequests).toHaveLength(1);
   expect(priorityRequests[0]!.url.searchParams.get('zones')).toBe('priority');
-  await page.getByRole('button', { name: /Оформление/ }).click();
-  await page.getByRole('menuitemradio', { name: 'Тёмная' }).click();
-  await reportScreenshot('report-priority-dark-ru');
-  await screenshot(page, 'work-report-dark');
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expectLightOnly(page);
+  await reportScreenshot('report-priority-light-under-dark-os-ru');
+  await screenshot(page, 'work-report-light-under-dark-os');
   await reportZones.click();
   await expect(page.getByRole('option', { name: 'Красные и жёлтые' })).toBeVisible();
   await page.getByRole('option', { name: 'Все объекты', exact: true }).click();
   await expect(reportZones).toContainText('Все объекты');
-  await reportScreenshot('report-all-dark-ru');
+  await reportScreenshot('report-all-light-under-dark-os-ru');
   const allZonesDownloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Сформировать доклад (PDF)' }).click();
   const allZonesDownload = await allZonesDownloadPromise;
@@ -3339,8 +3393,7 @@ test('work reports and object dossiers download authenticated PDF files', async 
   expect(allZonesRequest.url.searchParams.get('to')).toBe(priorityRequest.url.searchParams.get('to'));
 
   await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: /Оформление/ }).click();
-  await page.getByRole('menuitemradio', { name: 'Светлая' }).click();
+  await expectLightOnly(page);
   await reportScreenshot('report-all-light-ru');
   await page.keyboard.press('Escape');
   await page.setViewportSize({ width: 320, height: 844 });
@@ -3364,11 +3417,9 @@ test('work reports and object dossiers download authenticated PDF files', async 
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
   await screenshot(page, 'work-report-mobile-320-light');
 
-  const largeFontButton = page.getByRole('button', { name: /Крупный шрифт|Ірі қаріп/ });
-  await largeFontButton.click();
-  await expect(largeFontButton).toHaveAttribute('aria-pressed', 'true');
+  await setLargeFont(page, true);
   for (const language of ['RU', 'ҚАЗ']) {
-    await page.getByRole('radio', { name: language }).click();
+    await selectLanguage(page, language === 'RU' ? 'ru' : 'kk');
     const currentZones = reportPanel.getByRole('combobox');
     const priorityLabel = language === 'RU' ? 'Красные и жёлтые' : 'Қызыл және сары аймақтар';
     const allLabel = language === 'RU' ? 'Все объекты' : 'Барлық объектілер';
@@ -3405,13 +3456,12 @@ test('work reports and object dossiers download authenticated PDF files', async 
     await reportScreenshot(`report-mobile-320-large-${language === 'RU' ? 'ru' : 'kk'}-all`);
     await screenshot(page, `work-report-mobile-320-large-${language === 'RU' ? 'ru' : 'kk'}`);
   }
-  await page.getByRole('radio', { name: 'RU' }).click();
+  await selectLanguage(page, 'ru');
   await page.keyboard.press('Escape');
-  await largeFontButton.click();
-  await expect(largeFontButton).toHaveAttribute('aria-pressed', 'false');
+  await setLargeFont(page, false);
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.getByRole('button', { name: /Оформление/ }).click();
-  await page.getByRole('menuitemradio', { name: 'Тёмная' }).click();
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expectLightOnly(page);
   await page.keyboard.press('Escape');
 
   await page.goto('/objects/7');
@@ -3421,14 +3471,13 @@ test('work reports and object dossiers download authenticated PDF files', async 
   expect(dossierDownload.suggestedFilename()).toBe('D-07-dossier.pdf');
   const dossierRequest = harness.downloadRequests.find(({ url }) => url.pathname === '/api/v1/objects/7/dossier.pdf');
   expect(dossierRequest?.authorization).toBe('Bearer mock-ui-session');
-  await screenshot(page, 'object-dossier-dark');
-  await page.getByRole('button', { name: /Оформление/ }).click();
-  await page.getByRole('menuitemradio', { name: 'Светлая' }).click();
+  await screenshot(page, 'object-dossier-light-under-dark-os');
+  await expectLightOnly(page);
   await screenshot(page, 'object-dossier-light');
-  await page.getByRole('button', { name: /Оформление/ }).click();
-  await page.getByRole('menuitemradio', { name: 'Тёмная' }).click();
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expectLightOnly(page);
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('menuitemradio', { name: 'Тёмная' })).toBeHidden();
+  await expect(page.getByRole('button', { name: /Оформление/ })).toHaveCount(0);
   await page.emulateMedia({ media: 'print' });
   await expect.poll(() => page.evaluate(() =>
     window.matchMedia('print').matches &&
@@ -3457,7 +3506,7 @@ test('work reports and object dossiers download authenticated PDF files', async 
       viewportWidth: window.innerWidth,
     };
   });
-  expect(printState.theme).toBe('dark');
+  expect(printState.theme).toBe('light');
   expect(printState.pathname).toBe('/objects/7');
   expect(printState.printMediaMatches).toBe(true);
   expect(printState.hiddenControlsAreHidden).toBe(true);

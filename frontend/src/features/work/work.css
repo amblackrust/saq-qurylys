@@ -70,30 +70,9 @@
 }
 
 .work-card--next {
-  --surface: #292424;
-  --surface-raised: #40383a;
-  --surface-sunken: #393133;
-  --pressed: #58424a;
-  --border-strong: rgb(240 236 231 / 56%);
-  --text: #f0ece7;
-  --text-2: #ded5ce;
-  --text-3: #c6bbb2;
-  --border: rgb(240 236 231 / 22%);
-  --hover: rgb(240 236 231 / 10%);
-  --link: #f0ece7;
-  --focus: #f0ece7;
-  --accent: #aa4b62;
-  --accent-hover: #bc5d73;
-  --accent-text: #f0ece7;
-  --accent-ink: #f0ece7;
-  --zone-green-ink: #8be2b3;
-  --zone-yellow-ink: #ffd27a;
-  --zone-red-ink: #ffa49c;
   grid-column: span 5;
   display: flex;
   flex-direction: column;
-  background: #181716;
-  color: #f0ece7;
 }
 
 .work-card--next h2 {
@@ -112,9 +91,9 @@
 
 .work-card--next .work-next__action {
   width: 100%;
-  background: #983f55;
-  color: #f0ece7;
-  transition: background-color 180ms ease;
+  background: var(--accent);
+  color: var(--accent-ink);
+  transition: background-color 180ms var(--ease), transform 180ms var(--ease);
   overflow-wrap: anywhere;
 }
 
@@ -170,31 +149,11 @@
 }
 
 .work-card--signals {
-  --surface: #a2c7ce;
-  --surface-raised: #e5f1f3;
-  --surface-sunken: #d3e7eb;
-  --pressed: #78a1aa;
-  --border-strong: rgb(24 23 22 / 52%);
-  --text: #181716;
-  --text-2: #302b28;
-  --text-3: #504843;
-  --border: rgb(24 23 22 / 22%);
-  --hover: rgb(24 23 22 / 8%);
-  --link: #181716;
-  --focus: #181716;
-  --accent: #181716;
-  --accent-hover: #302b28;
-  --accent-text: #181716;
-  --accent-ink: #f0ece7;
-  --zone-green-ink: #145530;
-  --zone-yellow-ink: #634000;
-  --zone-red-ink: #74221c;
   grid-column: span 7;
-  background: #8ab7c1;
 }
 
 .work-card--signals h2 {
-  color: #181716;
+  color: var(--text);
 }
 
 .work-signals__layout {
@@ -217,9 +176,9 @@
 }
 
 .work-signals__tab.is-selected {
-  border-color: rgb(24 23 22 / 78%);
-  background: #181716;
-  color: #f0ece7;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
 }
 
 .work-signals__items {
@@ -271,40 +230,17 @@
 }
 
 .work-card--ads {
-  --surface: #7d3548;
-  --surface-raised: #824053;
-  --surface-sunken: #6f2d3e;
-  --pressed: #582332;
-  --border-strong: rgb(240 236 231 / 62%);
-  --text: #f0ece7;
-  --text-2: #f1dfe4;
-  --text-3: #e8cbd3;
-  --border: rgb(240 236 231 / 25%);
-  --link: #f0ece7;
-  --focus: #f0ece7;
-  --accent: #f0ece7;
-  --accent-hover: #fffaf5;
-  --accent-text: #f0ece7;
-  --accent-ink: #181716;
   grid-column: span 5;
   display: flex;
   flex-direction: column;
-  border-color: transparent;
-  background: #983f55;
-  color: #f0ece7;
-}
-
-.work-card--ads h2,
-.work-card--ads .work-card__eyebrow {
-  color: inherit;
 }
 
 .work-card--ads .work-ads__action {
   width: 100%;
   margin-top: 1.1rem;
-  background: #f0ece7;
-  color: #181716;
-  transition: background-color 180ms ease;
+  background: var(--surface-raised);
+  color: var(--text);
+  transition: background-color 180ms var(--ease), transform 180ms var(--ease);
   overflow-wrap: anywhere;
 }
 
@@ -377,11 +313,11 @@
 
 @media (hover: hover) and (pointer: fine) {
   .work-card--next .work-next__action:hover {
-    background: #aa4b62;
+    background: var(--accent-hover);
   }
 
   .work-card--ads .work-ads__action:hover {
-    background: #fffaf5;
+    background: var(--hover);
   }
 
   .work-object-link:hover {

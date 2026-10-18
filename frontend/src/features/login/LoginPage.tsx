@@ -10,7 +10,6 @@ import { useAuth } from '@/auth/useAuth';
 import { PasswordInput } from '@/components/form/PasswordInput';
 import { TextInput } from '@/components/form/TextInput';
 import { Button } from '@/components/ui/button';
-import { AppearanceMenu } from '@/layout/AppearanceMenu';
 import { LanguageSwitch } from '@/layout/LanguageSwitch';
 
 export function LoginPage() {
@@ -50,7 +49,6 @@ export function LoginPage() {
   return (
     <div className="relative grid min-h-dvh place-items-center bg-bg px-(--gutter) py-24 max-sm:pt-36">
       <div className="absolute top-4 right-(--gutter) flex flex-col items-end gap-2 sm:flex-row sm:items-center">
-        <div className="w-56 shrink-0"><AppearanceMenu /></div>
         <div className="shrink-0"><LanguageSwitch /></div>
       </div>
       <div className="flex w-full max-w-[480px] flex-col items-center gap-6">

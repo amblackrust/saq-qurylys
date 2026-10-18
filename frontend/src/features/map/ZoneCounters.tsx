@@ -20,7 +20,7 @@ const ZONE_TONE: Record<Zone, string> = {
   red: 'border-zone-red/30 bg-zone-red-bg text-zone-red-ink',
 };
 
-const CARD = 'flex flex-col gap-0.5 rounded border px-3 py-2 text-left';
+const CARD = 'flex flex-col gap-0.5 rounded-xl border px-3 py-2 text-left';
 const VALUE = 'font-heading text-2xl leading-tight font-bold tabular-nums';
 // Not uppercase: e2e reads the counters through innerText, which applies text-transform.
 const LABEL = 'text-xs font-semibold tracking-wide';
@@ -40,7 +40,7 @@ export function ZoneCounters({ counts, active, onToggle, animated = true }: Prop
           className={cn(
             CARD,
             ZONE_TONE[zone],
-            'cursor-pointer outline-none transition-[box-shadow,filter,border-color] duration-(--dur) hover:brightness-125 focus-visible:ring-1 focus-visible:ring-focus',
+            'cursor-pointer outline-none transition-[box-shadow,border-color,transform] duration-(--dur) ease-(--ease) hover:-translate-y-px hover:shadow-1 focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface active:translate-y-0',
             'aria-pressed:border-primary aria-pressed:ring-1 aria-pressed:ring-primary',
           )}
           aria-pressed={active === zone}

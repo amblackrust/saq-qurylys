@@ -16,7 +16,7 @@ interface Item {
 }
 
 const rowClass =
-  'flex w-full min-h-11 cursor-pointer flex-col justify-center gap-0.5 rounded px-3 py-1.5 text-left text-base text-text outline-none aria-selected:bg-surface-sunken aria-selected:ring-1 aria-selected:ring-focus';
+  'flex w-full min-h-11 cursor-pointer flex-col justify-center gap-0.5 rounded-xl px-3 py-2 text-left text-base text-text outline-none aria-selected:bg-surface-sunken aria-selected:ring-1 aria-selected:ring-focus';
 
 function isTypingTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
@@ -66,11 +66,11 @@ export function GlobalSearch() {
           to: `/objects/${hit.id}`,
           node: (
             <>
-              <span className="flex items-center justify-between gap-2">
-                <span className="min-w-0 truncate font-medium">{hit.name}</span>
+              <span className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1">
+                <span className="min-w-0 flex-1 break-words font-medium">{hit.name}</span>
                 <ZoneBadge zone={hit.zone} />
               </span>
-              <span className="truncate text-sm text-text-3">
+              <span className="whitespace-normal break-words text-sm text-text-3">
                 {[hit.address, hit.developer_name, hit.code].filter(Boolean).join(' · ')}
               </span>
               <span className="text-xs text-text-3">{matched(hit.match)}</span>
@@ -86,8 +86,8 @@ export function GlobalSearch() {
           to: hit.object_id == null ? '' : `/objects/${hit.object_id}`,
           node: (
             <>
-              <span className="truncate font-medium">{hit.name}</span>
-              <span className="text-sm text-text-3">
+              <span className="whitespace-normal break-words font-medium">{hit.name}</span>
+              <span className="whitespace-normal break-words text-sm text-text-3">
                 {hit.bin}
                 {hit.object_id == null && ` · ${t('globalSearch.noObjects')}`}
               </span>
@@ -103,8 +103,8 @@ export function GlobalSearch() {
           to: `/signals/${hit.id}`,
           node: (
             <>
-              <span className="truncate font-medium tabular-nums">{hit.number}</span>
-              <span className="truncate text-sm text-text-3">
+              <span className="break-words font-medium tabular-nums">{hit.number}</span>
+              <span className="whitespace-normal break-words text-sm text-text-3">
                 {hit.object_name} · {e('signal_status', hit.status)}
               </span>
             </>
@@ -161,7 +161,7 @@ export function GlobalSearch() {
       ref={rootRef}
       className="relative order-last min-w-0 basis-full pb-2 lg:order-0 lg:min-w-48 lg:max-w-lg lg:flex-1 lg:basis-auto lg:pb-0"
     >
-      <InputGroup className="h-10 text-base">
+      <InputGroup className="h-11 min-h-11 rounded-full bg-surface-raised text-base shadow-1 has-[[data-slot=input-group-control]:focus-visible]:ring-2">
         <InputGroupAddon>
           <IconSearch aria-hidden className="size-5" />
         </InputGroupAddon>
@@ -177,7 +177,7 @@ export function GlobalSearch() {
           autoComplete="off"
           maxLength={200}
           placeholder={t('globalSearch.placeholder')}
-          className="px-2 text-base"
+          className="px-3 text-base"
           value={text}
           onChange={(event) => {
             setText(event.target.value);
@@ -193,7 +193,7 @@ export function GlobalSearch() {
           id={listId}
           role="listbox"
           aria-label={t('globalSearch.label')}
-          className="absolute top-full left-0 z-50 mt-1 max-h-[70vh] w-[max(100%,28rem)] max-w-[calc(100vw-2*var(--gutter))] overflow-y-auto rounded border border-border-strong bg-popover p-1 shadow-2 max-[62em]:w-full"
+          className="absolute top-full left-0 z-50 mt-2 max-h-[min(70dvh,36rem)] w-[max(100%,28rem)] max-w-[calc(100vw-2*var(--gutter))] overflow-y-auto rounded-2xl border border-border-strong bg-popover p-1.5 shadow-2 outline-none duration-150 ease-out animate-in fade-in-0 slide-in-from-top-1 motion-reduce:animate-none max-[62em]:max-h-[min(56dvh,28rem)] max-[62em]:w-full"
         >
           {status && (
             <div role="status" className="px-3 py-3 text-base text-text-3">

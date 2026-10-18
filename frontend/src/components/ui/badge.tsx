@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
  * `default` is the pink brand tone, `secondary` the neutral one.
  */
 const badgeVariants = cva(
-  'inline-flex min-h-7 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded border border-transparent px-2 text-[13px] font-medium whitespace-nowrap [&>svg]:pointer-events-none [&>svg]:size-4',
+  'inline-flex min-h-7 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-full border border-transparent px-2.5 text-[13px] font-medium whitespace-nowrap [&>svg]:pointer-events-none [&>svg]:size-4',
   {
     variants: {
       variant: {

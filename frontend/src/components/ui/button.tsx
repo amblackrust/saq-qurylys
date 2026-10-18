@@ -5,12 +5,12 @@ import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 
 const buttonVariants = cva(
-  "inline-flex shrink-0 items-center justify-center gap-1.5 rounded border border-transparent text-sm font-medium whitespace-nowrap outline-none select-none transition-[color,background-color,border-color,box-shadow] duration-(--dur) focus-visible:ring-1 focus-visible:ring-focus disabled:pointer-events-none disabled:opacity-50 aria-invalid:ring-1 aria-invalid:ring-zone-red [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl border border-transparent text-sm font-medium whitespace-nowrap outline-none select-none transition-[color,background-color,border-color,box-shadow,transform] duration-(--dur) ease-(--ease) active:translate-y-px focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:pointer-events-none disabled:opacity-50 aria-invalid:ring-1 aria-invalid:ring-zone-red [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
         /** pink, the main action */
-        default: 'bg-primary text-primary-foreground hover:bg-accent-hover hover:shadow-glow',
+        default: 'bg-primary text-primary-foreground hover:bg-accent-hover',
         secondary:
           'border-border-strong bg-surface-sunken text-text hover:bg-surface-raised active:bg-pressed aria-expanded:bg-surface-raised',
         outline: 'border-border-strong text-text-2 hover:bg-hover hover:text-text active:bg-pressed aria-expanded:bg-hover',

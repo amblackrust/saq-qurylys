@@ -125,10 +125,12 @@ export function ObjectCard({ object }: { object: ObjectDetail }) {
             <ComplaintsSection object={object} />
           </TabsContent>
         </Tabs>
-        <aside className="order-1 flex min-w-0 flex-col gap-5 lg:order-2" aria-label={t('card.workspace.inspector')}>
+        <aside className="order-1 min-w-0 lg:order-2" aria-label={t('card.workspace.inspector')}>
           <ObjectReviewActions object={object} />
-          <RiskPanel object={object} />
         </aside>
+        <div className="order-3 min-w-0 lg:col-span-2">
+          <RiskPanel object={object} />
+        </div>
       </div>
       <details
         className="mt-6 border-t border-border pt-3"

@@ -279,7 +279,7 @@ export function AssistantPanel({ open, expanded, onToggleExpanded, onClose }: Pr
       </p>
 
       <div className="flex flex-none flex-col gap-1.5 border-t border-border p-3">
-        <div className="flex flex-col rounded border border-border-strong bg-surface-sunken focus-within:border-focus focus-within:ring-1 focus-within:ring-focus">
+        <div className="flex flex-col rounded-xl border border-border-strong bg-surface-sunken focus-within:border-focus focus-within:ring-1 focus-within:ring-focus">
           <Textarea
             ref={composerRef}
             value={draft}

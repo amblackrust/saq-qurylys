@@ -5,7 +5,6 @@ import { findFactor, readBreakdown, type ObjectDetail, type RiskBreakdown, type 
 import { Chip } from '@/components/Chip';
 import { KeyValue } from '@/components/KeyValue';
 import { Panel } from '@/components/Panel';
-import BorderGlow from '@/components/fx/BorderGlow';
 import CountUp from '@/components/fx/CountUp';
 import { LegalBasis } from '@/components/risk/LegalBasis';
 import { NeedsCheckList } from '@/components/risk/NeedsCheckList';
@@ -29,7 +28,7 @@ function ZoneRule({ yellowMin, redMin, current }: { yellowMin: number; redMin: n
     { zone: 'red', text: t('card.risk.rule.red', { red: redMin }) },
   ];
   return (
-    <section className="mt-4" aria-labelledby="zone-rule-title">
+    <section className="mt-4 min-w-0" aria-labelledby="zone-rule-title">
       <h4 id="zone-rule-title" className={cn(subTitleClass, 'mb-2')}>
         {t('card.risk.rule.title')}
       </h4>
@@ -98,7 +97,6 @@ export function RiskPanel({ object }: { object: ObjectDetail }) {
   const settings = useSettings().data;
   const latest = object.latest_score;
   const breakdown = readBreakdown(latest);
-  const red = latest?.zone === 'red';
 
   const mismatch = findFactor(breakdown, 'r5_readiness_mismatch');
   const legalChecks =
@@ -109,104 +107,111 @@ export function RiskPanel({ object }: { object: ObjectDetail }) {
   const windowDays = settings?.ad_window_days ?? findFactor(breakdown, 'r3_active_ads')?.detail.window_days;
 
   const panel = (
-    // In the red zone the glow draws the frame, so the panel gives up its own.
     <Panel
       title={t('card.risk.title')}
       id="risk"
-      className={cn(anchorTargetClass, red && 'border-0! bg-transparent! shadow-none!')}
+      className={anchorTargetClass}
     >
-      {latest ? (
-        <>
-          <div className="flex flex-wrap items-center justify-between gap-3" data-testid="risk-summary">
-            <div className="flex items-baseline gap-1.5">
-              <span className="font-heading text-5xl leading-none font-bold tracking-tight tabular-nums">
-                <CountUp key={latest.calculated_at}to={latest.score} duration={1.2} />
-              </span>
-              <span className="text-sm text-text-3">/ 100</span>
-            </div>
-            <ZoneBadge zone={latest.zone} size="md" />
-          </div>
-          <div className="mt-3 h-1 overflow-hidden rounded-full bg-surface-sunken" aria-hidden>
-            <div
-              className="h-full rounded-full"
-              style={{ width: `${latest.score}%`, background: zoneColor(latest.zone) }}
+      <div className="grid min-w-0 items-start gap-x-6 lg:grid-cols-2 xl:grid-cols-3">
+        <div className="min-w-0 lg:col-span-2 xl:col-span-3">
+          {latest ? (
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-3" data-testid="risk-summary">
+                <div className="flex items-baseline gap-1.5">
+                  <span className="font-heading text-5xl leading-none font-bold tracking-tight tabular-nums">
+                    <CountUp key={latest.calculated_at} to={latest.score} duration={1.2} />
+                  </span>
+                  <span className="text-sm text-text-3">/ 100</span>
+                </div>
+                <ZoneBadge zone={latest.zone} size="md" />
+              </div>
+              <div className="mt-3 h-1 overflow-hidden rounded-full bg-surface-sunken" aria-hidden>
+                <div
+                  className="h-full rounded-full"
+                  style={{ width: `${latest.score}%`, background: zoneColor(latest.zone) }}
+                />
+              </div>
+
+              <div className="max-w-[65ch]">
+                <RiskSummary zone={latest.zone} breakdown={breakdown} />
+              </div>
+            </>
+          ) : (
+            <p className="mt-0 text-text-3">{t('card.risk.notScored')}</p>
+          )}
+        </div>
+
+        {latest && (
+          <>
+            <section className="mt-4 min-w-0" aria-labelledby="risk-reasons-title">
+              <h4 id="risk-reasons-title" className={cn(subTitleClass, 'mb-2')}>
+                {t('card.risk.reasons')}
+              </h4>
+              {latest.zone_reasons.length > 0 ? (
+                <ul className="flex flex-wrap gap-1.5">
+                  {latest.zone_reasons.map((code) => (
+                    <li key={code}>
+                      <Chip tone={latest.zone}>{reasonLabel(code)}</Chip>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-text-3">{t('card.risk.noReasons')}</p>
+              )}
+            </section>
+
+            <ZoneRule
+              yellowMin={settings?.zone_yellow_min ?? DEFAULT_YELLOW_MIN}
+              redMin={settings?.zone_red_min ?? DEFAULT_RED_MIN}
+              current={latest.zone}
             />
-          </div>
 
-          <RiskSummary zone={latest.zone} breakdown={breakdown} />
-
-          <section className="mt-4" aria-labelledby="risk-reasons-title">
-            <h4 id="risk-reasons-title" className={cn(subTitleClass, 'mb-2')}>
-              {t('card.risk.reasons')}
-            </h4>
-            {latest.zone_reasons.length > 0 ? (
-              <ul className="flex flex-wrap gap-1.5">
-                {latest.zone_reasons.map((code) => (
-                  <li key={code}>
-                    <Chip tone={latest.zone}>{reasonLabel(code)}</Chip>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-text-3">{t('card.risk.noReasons')}</p>
+            {breakdown && (
+              <div className="grid min-w-0 items-start gap-x-6 sm:grid-cols-2 lg:col-span-2">
+                <LegalBasis status={breakdown.legal_basis_status} checks={legalChecks} />
+                <NeedsCheckList items={breakdown.needs_check} />
+              </div>
             )}
-          </section>
+          </>
+        )}
 
-          <ZoneRule
-            yellowMin={settings?.zone_yellow_min ?? DEFAULT_YELLOW_MIN}
-            redMin={settings?.zone_red_min ?? DEFAULT_RED_MIN}
-            current={latest.zone}
-          />
-
-          {breakdown && <LegalBasis status={breakdown.legal_basis_status} checks={legalChecks} />}
-          {breakdown && <NeedsCheckList items={breakdown.needs_check} />}
-        </>
-      ) : (
-        <p className="text-text-3">{t('card.risk.notScored')}</p>
-      )}
-
-      <ReadinessGap
-        actual={object.readiness_actual_pct}
-        claimed={object.readiness_claimed_pct}
-        gap={object.readiness_gap_pp}
-        overstated={mismatch?.triggered ?? false}
-      />
-
-      <div className="mt-4 border-t border-border pt-3">
-        <KeyValue
-          columns={1}
-          items={[
-            {
-              label: windowDays === undefined ? t('card.risk.adsPeriod') : t('card.risk.ads', { count: windowDays }),
-              value:
-                object.ads_7d_count > 0 ? (
-                  <Link to={`/ads?object_id=${object.id}`}>
-                    {t('card.risk.publications', { count: object.ads_7d_count })}
-                  </Link>
-                ) : (
-                  t('card.risk.publications', { count: 0 })
-                ),
-            },
-            {
-              label: t('card.risk.calculatedAt'),
-              value: latest && (
-                <span className="tabular-nums">
-                  {dateTime(latest.calculated_at)}
-                  {latest.trigger && ` · ${e('score_trigger', latest.trigger)}`}
-                </span>
-              ),
-            },
-          ]}
+        <ReadinessGap
+          actual={object.readiness_actual_pct}
+          claimed={object.readiness_claimed_pct}
+          gap={object.readiness_gap_pp}
+          overstated={mismatch?.triggered ?? false}
         />
+
+        <div className="mt-4 min-w-0 border-t border-border pt-3 lg:col-span-2 xl:col-span-3">
+          <KeyValue
+            columns={1}
+            items={[
+              {
+                label: windowDays === undefined ? t('card.risk.adsPeriod') : t('card.risk.ads', { count: windowDays }),
+                value:
+                  object.ads_7d_count > 0 ? (
+                    <Link to={`/ads?object_id=${object.id}`}>
+                      {t('card.risk.publications', { count: object.ads_7d_count })}
+                    </Link>
+                  ) : (
+                    t('card.risk.publications', { count: 0 })
+                  ),
+              },
+              {
+                label: t('card.risk.calculatedAt'),
+                value: latest && (
+                  <span className="tabular-nums">
+                    {dateTime(latest.calculated_at)}
+                    {latest.trigger && ` · ${e('score_trigger', latest.trigger)}`}
+                  </span>
+                ),
+              },
+            ]}
+          />
+        </div>
       </div>
     </Panel>
   );
 
-  return red ? (
-    <BorderGlow glowColor="5 100 62" colors={['var(--zone-red-ink)', 'var(--accent-text)', 'var(--zone-red)']}>
-      {panel}
-    </BorderGlow>
-  ) : (
-    panel
-  );
+  return panel;
 }

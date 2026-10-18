@@ -1,0 +1,80 @@
+/* A compact rail keeps the available sections visible above the active page. */
+.bento-section-nav__items {
+  display: contents;
+}
+
+.bento-section-nav.bento-section-nav--compact {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.4rem, 0.55vw, 0.65rem);
+  min-width: 0;
+}
+
+.bento-section-nav--compact .bento-section-nav__items {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: clamp(0.4rem, 0.55vw, 0.65rem);
+  min-width: 0;
+}
+
+.bento-section-nav--compact .bento-section-nav__items > article {
+  grid-column: auto;
+  min-width: 0;
+}
+
+.bento-section-nav--compact > article[data-expanded='true'] {
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) and (hover: hover) and (pointer: fine) {
+  .bento-navigation__link:hover {
+    transform: translateY(-1px);
+  }
+
+  .bento-navigation__link:hover .bento-navigation__arrow {
+    transform: translate(0.25rem, -0.25rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bento-navigation__link {
+    transform: none !important;
+    scale: 1 !important;
+    transition: none !important;
+  }
+}
+
+@media (max-width: 39.999rem) {
+  .bento-section-nav--compact .bento-section-nav__items {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+    margin-inline: calc(0px - var(--gutter));
+    padding-inline: var(--gutter);
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scroll-padding-inline: var(--gutter);
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .bento-section-nav--compact .bento-section-nav__items::-webkit-scrollbar {
+    display: none;
+  }
+
+  .bento-section-nav--compact .bento-section-nav__items > article {
+    flex: 0 0 clamp(11rem, 56vw, 13rem);
+    min-height: 3.5rem;
+    scroll-snap-align: start;
+  }
+
+  .bento-section-nav--compact .bento-section-nav__items > article > a,
+  .bento-section-nav--compact > article[data-expanded='true'] > a {
+    min-height: 3.5rem;
+    align-items: center;
+    padding: 0.65rem 0.75rem;
+  }
+}
