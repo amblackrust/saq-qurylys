@@ -2,7 +2,7 @@
 import type ru from '../ru/common';
 
 const common: typeof ru = {
-  appName: 'AYQYN',
+  appName: 'SAQ QURYLYS',
   error: 'Қате',
   cancel: 'Бас тарту',
   print: 'Басып шығару',

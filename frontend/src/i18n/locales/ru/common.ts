@@ -1,5 +1,5 @@
 const common = {
-  appName: 'AYQYN',
+  appName: 'SAQ QURYLYS',
   error: 'Ошибка',
   cancel: 'Отмена',
   print: 'Печать',

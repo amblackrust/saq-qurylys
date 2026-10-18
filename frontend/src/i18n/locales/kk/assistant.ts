@@ -10,7 +10,7 @@ const assistant: typeof ru = {
   collapse: 'Панельді тарылту',
   close: 'Жабу',
   composer: 'Көмекшіге хабарлама',
-  placeholder: 'AYQYN жүйесі туралы сұраңыз…',
+  placeholder: 'SAQ QURYLYS жүйесі туралы сұраңыз…',
   send: 'Жіберу',
   stop: 'Тоқтату',
   retry: 'Қайталау',

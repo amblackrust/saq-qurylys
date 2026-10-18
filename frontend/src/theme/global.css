@@ -94,7 +94,7 @@
   }
 }
 
-/* Print the current page content without the AYQYN app shell or interactive controls. */
+/* Print the current page content without the app shell or interactive controls. */
 @media print {
   :root {
     color-scheme: light;

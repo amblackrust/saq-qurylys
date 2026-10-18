@@ -590,7 +590,7 @@ export function KitPage() {
           <div className="flex flex-col gap-1">
             <span className="text-2xs tracking-wider text-text-3 uppercase">GlitchText</span>
             <GlitchText className="text-3xl" backgroundColor="var(--bg)">
-              AYQYN
+              SAQ QURYLYS
             </GlitchText>
           </div>
           <div className="flex flex-col gap-1">

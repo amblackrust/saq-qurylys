@@ -53,8 +53,8 @@ export function LoginPage() {
       </div>
       <div className="flex w-full max-w-[480px] flex-col items-center gap-6">
         <div className="flex items-center gap-3 text-text">
-          <img src="/ayqyn-mark.svg" alt="" aria-hidden="true" className="size-12 shrink-0" />
-          <span className="text-xl font-semibold tracking-tight">AYQYN</span>
+          <img src="/saq-qurylys-mark.svg" alt="" aria-hidden="true" className="size-12 shrink-0" />
+          <span className="text-xl font-semibold tracking-tight">SAQ QURYLYS</span>
         </div>
         <form
           className="w-full overflow-hidden rounded-2xl border border-border bg-surface shadow-2"

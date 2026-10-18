@@ -1732,11 +1732,11 @@ test('light-only theme, language dropdown, and profile actions work across suppo
     await loginPage.addInitScript(() => localStorage.setItem('saq_theme', 'dark'));
     await loginPage.goto(new URL('/login', page.url()).toString());
     await expect(loginPage.getByRole('heading', { name: 'Вход в систему' })).toBeVisible();
-    await expect(loginPage).toHaveTitle('AYQYN');
-    await expect(loginPage.getByText('AYQYN', { exact: true })).toBeVisible();
+    await expect(loginPage).toHaveTitle('SAQ QURYLYS');
+    await expect(loginPage.getByText('SAQ QURYLYS', { exact: true })).toBeVisible();
     await expectLightOnly(loginPage);
     const faviconHref = await loginPage.locator('link[rel="icon"]').getAttribute('href');
-    expect(faviconHref).toBe('/ayqyn-mark.svg');
+    expect(faviconHref).toBe('/saq-qurylys-mark.svg');
     const faviconResponse = await loginPage.request.get(new URL(faviconHref!, loginPage.url()).toString());
     expect(faviconResponse.status()).toBe(200);
     expect(faviconResponse.headers()['content-type']).toContain('image/svg+xml');
@@ -1751,7 +1751,7 @@ test('light-only theme, language dropdown, and profile actions work across suppo
       await loginPage.setViewportSize({ width, height });
       await expectLightOnly(loginPage);
       const languageTrigger = loginPage.getByTestId('header-language-trigger');
-      const brand = loginPage.locator('img[src="/ayqyn-mark.svg"]');
+      const brand = loginPage.locator('img[src="/saq-qurylys-mark.svg"]');
       const triggerBox = await languageTrigger.boundingBox();
       const brandBox = await brand.boundingBox();
       expect(triggerBox).not.toBeNull();
@@ -2923,7 +2923,7 @@ test('registry staff can review and download a signal package without changing t
   expect(allResponse.headers()['content-type']).toContain('application/zip');
   const allDownload = await allDownloadPromise;
   await expect(zipButton).not.toHaveAttribute('aria-busy', 'true');
-  expect(allDownload.suggestedFilename()).toBe('AYQYN_SIG-2026-0042_package.zip');
+  expect(allDownload.suggestedFilename()).toBe('SAQ_QURYLYS_SIG-2026-0042_package.zip');
   await expect.poll(() => harness.downloadRequests.filter(({ url }) => url.pathname === '/api/v1/signals/42/package.zip')).toHaveLength(1);
   const packageRequests = () => harness.downloadRequests.filter(({ url }) => url.pathname === '/api/v1/signals/42/package.zip');
   expect(packageRequests()[0]?.authorization).toBe('Bearer mock-ui-session');
@@ -3520,7 +3520,7 @@ test('object register exports its complete filtered query and fits the mobile he
   const response = await responsePromise;
   expect(response.headers()['content-type']).toContain('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   const download = await downloadPromise;
-  expect(download.suggestedFilename()).toMatch(/^AYQYN_ЖК_\d{4}-\d{2}-\d{2}\.xlsx$/);
+  expect(download.suggestedFilename()).toMatch(/^SAQ_QURYLYS_ЖК_\d{4}-\d{2}-\d{2}\.xlsx$/);
   const exportRequest = harness.downloadRequests.find(({ url }) => url.pathname === '/api/v1/objects/export.xlsx');
   expect(exportRequest?.authorization).toBe('Bearer mock-ui-session');
   expect(exportRequest?.url.searchParams.get('zone')).toBe('red');
@@ -3575,7 +3575,7 @@ test('signal workbook follows list filters, surfaces export limits, and is local
   const response = await responsePromise;
   expect(response.headers()['content-type']).toContain('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   const download = await downloadPromise;
-  expect(download.suggestedFilename()).toMatch(/^AYQYN_Сигналы_\d{4}-\d{2}-\d{2}\.xlsx$/);
+  expect(download.suggestedFilename()).toMatch(/^SAQ_QURYLYS_Сигналы_\d{4}-\d{2}-\d{2}\.xlsx$/);
   expect(harness.downloadRequests).toHaveLength(2);
 
   await page.evaluate(() => localStorage.setItem('saq_lang', 'kk'));

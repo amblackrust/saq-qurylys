@@ -129,8 +129,8 @@ export function BentoNavigation({ headerUtilities, assistantOpen }: BentoNavigat
             aria-label={`${t('appName')} — ${t('nav.homeTitle')}`}
             className="flex h-11 min-w-0 shrink-0 items-center gap-2 text-text no-underline outline-none focus-visible:rounded-xl focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
           >
-            <img src="/ayqyn-mark.svg" alt="" aria-hidden="true" className="size-8 shrink-0 sm:size-9" />
-            <span className="text-sm font-semibold tracking-[0.06em] sm:text-base">AYQYN</span>
+            <img src="/saq-qurylys-mark.svg" alt="" aria-hidden="true" className="size-8 shrink-0 sm:size-9" />
+            <span className="text-sm font-semibold tracking-[0.06em] sm:text-base">SAQ QURYLYS</span>
           </Link>
           <div className="order-last min-w-0 basis-full lg:order-0 lg:min-w-48 lg:max-w-lg lg:flex-1 lg:basis-auto">
             <GlobalSearch />

@@ -7,7 +7,7 @@ const assistant = {
   collapse: 'Сузить панель',
   close: 'Закрыть',
   composer: 'Сообщение ассистенту',
-  placeholder: 'Спросите о работе в AYQYN…',
+  placeholder: 'Спросите о работе в SAQ QURYLYS…',
   send: 'Отправить',
   stop: 'Остановить',
   retry: 'Повторить',

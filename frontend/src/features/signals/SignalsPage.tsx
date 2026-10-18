@@ -75,7 +75,7 @@ export function SignalsPage() {
     try {
       await downloadFile(
         `/signals/export.xlsx${buildQuery(filters)}`,
-        `AYQYN_${t('list.exportFilename')}_${formatApiDate(new Date())}.xlsx`,
+        `SAQ_QURYLYS_${t('list.exportFilename')}_${formatApiDate(new Date())}.xlsx`,
       );
     } catch (error) {
       toast.error(errorMessage(error), { title: t('list.exportError') });

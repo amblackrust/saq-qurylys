@@ -95,7 +95,7 @@ export function SignalPackageDialog({ opened, onClose, detail, dirty }: Props) {
     try {
       await downloadFile(
         `/signals/${detail.id}/package.zip?${params.toString()}`,
-        `AYQYN_${materials.number}_package.zip`,
+        `SAQ_QURYLYS_${materials.number}_package.zip`,
       );
     } catch (error) {
       toast.error(errorMessage(error), { title: t('package.downloadError') });
