@@ -1,5 +1,6 @@
 import { Link } from 'react-router';
 import { openFile } from '@/api/client';
+import { toastError } from '@/api/queryClient';
 import type { EvidenceRef } from '@/api/types';
 import { useEnum } from '@/i18n/useEnum';
 import { anchorId, isAnchorType } from './anchors';
@@ -41,7 +42,7 @@ export function EvidenceRefLink({ evidenceRef, linked = true, anchors = true }: 
       <button
         type="button"
         className={interactiveClass}
-        onClick={() => void openFile(`/evidence/${evidenceRef.id}/content`)}
+        onClick={() => void openFile(`/evidence/${evidenceRef.id}/content`).catch(toastError)}
       >
         {label}
       </button>

@@ -179,22 +179,54 @@ export async function apiBlob(path: string, signal?: AbortSignal): Promise<Blob>
 /** Saves an authenticated file through a temporary object URL. */
 export async function downloadFile(path: string, filename: string): Promise<void> {
   const blob = await apiBlob(path);
+  downloadBlob(blob, filename);
+}
+
+function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
   link.download = filename;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  try {
+    document.body.append(link);
+    link.click();
+  } finally {
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  }
 }
 
 /** Opens an authenticated file in a new tab. */
 export async function openFile(path: string): Promise<void> {
-  const blob = await apiBlob(path);
-  const url = URL.createObjectURL(blob);
-  window.open(url, '_blank', 'noopener');
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  // Reserve the tab while the click still has user activation; browsers may block
+  // window.open() after the authenticated fetch has completed.
+  let tab: Window | null = null;
+  let url: string | undefined;
+  try {
+    tab = window.open('about:blank', '_blank');
+    if (tab) tab.opener = null;
+
+    const response = await send(path);
+    const blob = await response.blob();
+
+    // The user may close the reserved tab while the authenticated request is in flight.
+    if (tab?.closed) return;
+    if (!tab) {
+      const filename = response.headers.get('Content-Disposition')?.match(/filename="([^"]+)"/i)?.[1] ?? 'evidence';
+      downloadBlob(blob, filename);
+      return;
+    }
+
+    url = URL.createObjectURL(blob);
+    tab.location.replace(url);
+
+    const openedUrl = url;
+    setTimeout(() => URL.revokeObjectURL(openedUrl), 60_000);
+  } catch (error) {
+    tab?.close();
+    if (url) URL.revokeObjectURL(url);
+    throw error;
+  }
 }
 
 export function unwrapList<T>(response: ListResponse<T>): T[] {

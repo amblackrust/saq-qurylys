@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useEvidenceContent } from '@/api/hooks/misc';
 import type { EvidenceMeta } from '@/api/types';
 import { downloadFile, openFile } from '@/api/client';
+import { toastError } from '@/api/queryClient';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Spinner } from '@/components/ui/spinner';
@@ -511,7 +512,7 @@ export function EvidenceThumbs({ evidence, size = 72 }: ThumbsProps) {
             key={item.id}
             type="button"
             className="inline-flex items-center gap-1.5 rounded border border-border-strong bg-surface-raised px-2.5 py-1.5 text-sm text-text hover:bg-hover focus-visible:ring-1 focus-visible:ring-focus focus-visible:outline-none"
-            onClick={() => void openFile(`/evidence/${item.id}/content`)}
+            onClick={() => void openFile(`/evidence/${item.id}/content`).catch(toastError)}
           >
             {item.content_type === 'application/pdf' ? <IconFileTypePdf size={16} /> : <IconPhoto size={16} />}
             {e('evidence_kind', item.kind)}

@@ -26,7 +26,7 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function toastError(error: unknown) {
+export function toastError(error: unknown) {
   if (error instanceof ApiError && error.status === 401) return; // handled by the login redirect
   toast.error(errorMessage(error), { title: i18n.t('error', { ns: 'common' }) });
 }
