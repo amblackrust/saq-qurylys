@@ -7,6 +7,7 @@ import type {
   AdListParams,
   AdPatch,
   AdRow,
+  AdTriageInput,
   CaptureRequest,
   CollectorStatus,
   CollectQueued,
@@ -98,6 +99,19 @@ export function useConfirmHit() {
     mutationFn: ({ adId, hitId, confirmed }: { adId: number; hitId: number; confirmed: boolean }) =>
       api<unknown>(`/ads/${adId}/hits/${hitId}/confirm`, { method: 'POST', body: { confirmed } }),
     onSuccess: () => invalidateAdData(qc),
+  });
+}
+
+export function useTriageAd() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: number; data: AdTriageInput }) =>
+      api<AdDetail>(`/ads/${id}/triage`, { method: 'PATCH', body: data }),
+    onSuccess: (data, { id }) => {
+      qc.setQueryData(qk.ad(id), data);
+      return qc.invalidateQueries({ queryKey: qk.ads });
+    },
+    meta: { success: 'adTriageUpdated' },
   });
 }
 

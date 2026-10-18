@@ -586,6 +586,26 @@ export interface LlmFinding {
   uncertain: boolean;
 }
 
+export type AdReviewState = 'unreviewed' | 'reviewed' | 'deferred' | 'irrelevant';
+
+export type AdQueueReason =
+  | 'capture_pending'
+  | 'capture_failed'
+  | 'ocr_pending'
+  | 'ocr_failed'
+  | 'llm_pending'
+  | 'llm_failed'
+  | 'uncertain_object'
+  | 'unreviewed_phrase_hits'
+  | 'manual_review';
+
+export interface AdDuplicateInstance {
+  id: number;
+  url: string | null;
+  platform: Platform;
+  source_label: string;
+}
+
 /** What the LLM extracted from the text: a hypothesis until an analyst accepts it. */
 export interface LlmExtraction {
   findings?: LlmFinding[];
@@ -598,6 +618,15 @@ export interface LlmExtraction {
 
 export interface AdRow {
   id: number;
+  review_state: AdReviewState;
+  reviewed_by: number | null;
+  reviewed_at: string | null;
+  review_note: string | null;
+  queue_reasons: AdQueueReason[];
+  /** Advisory exact-text duplicates from the same known source account; never suppresses queue rows. */
+  duplicate_count: number;
+  duplicate_instances: AdDuplicateInstance[];
+  duplicate_instances_truncated: boolean;
   territory_id: number | null;
   source_account_id: number | null;
   platform: Platform;
@@ -656,8 +685,17 @@ export interface AdListParams {
   status?: AdStatus;
   is_demo?: boolean;
   q?: string;
+  queue?: boolean;
+  review_state?: AdReviewState;
+  duplicate_of?: number;
   limit?: number;
   offset?: number;
+}
+
+export interface AdTriageInput {
+  state: AdReviewState;
+  /** Omitted preserves the current note; null explicitly clears it. */
+  note?: string | null;
 }
 
 export interface AdPatch {
