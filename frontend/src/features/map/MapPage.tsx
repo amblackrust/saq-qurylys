@@ -34,6 +34,7 @@ export function MapPage() {
   const [params] = useSearchParams();
   const territoryId = parseId(params.get('territory'));
   const districtId = parseId(params.get('district'));
+  const objectId = parseId(params.get('object_id'));
   // Zone is a client-side narrowing of the loaded objects, so it stays out of the URL.
   const [zone, setZone] = useState<Zone | null>(null);
   const [timeMachine, setTimeMachine] = useState(false);
@@ -67,7 +68,9 @@ export function MapPage() {
       <QueryBoundary query={dashboard}>
         {(data) => (
           <DashboardContent
+            key={objectId ?? 'all'}
             data={data}
+            objectId={objectId}
             territoryId={territoryId}
             districtId={districtId}
             zone={zone}
@@ -85,6 +88,7 @@ export function MapPage() {
 
 interface ContentProps {
   data: Dashboard;
+  objectId: number | null;
   territoryId: number | null;
   districtId: number | null;
   zone: Zone | null;
@@ -99,6 +103,7 @@ interface ContentProps {
 
 function DashboardContent({
   data,
+  objectId,
   territoryId,
   districtId,
   zone,
@@ -112,8 +117,9 @@ function DashboardContent({
   const { t: common } = useTranslation();
   const [, setParams] = useSearchParams();
   const navigate = useNavigate();
-  const [highlightedId, setHighlightedId] = useState<number | null>(null);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const initialObjectId = objectId !== null && data.objects.some((item) => item.id === objectId) ? objectId : null;
+  const [highlightedId, setHighlightedId] = useState<number | null>(initialObjectId);
+  const [selectedId, setSelectedId] = useState<number | null>(initialObjectId);
   const keyStatus = useKeyStatusLabel();
   const { city } = useCityScope(territoryId);
   const { data: districts } = useDistricts(city?.id);

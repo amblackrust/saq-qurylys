@@ -94,20 +94,23 @@ export function ObjectsPage() {
   };
 
   const columns = col.columns([
-    col.accessor('code', {
-      header: t('list.columns.code'),
-      cell: (info) => <span className="whitespace-nowrap tabular-nums">{info.getValue()}</span>,
-    }),
     col.accessor('name', {
       header: t('list.columns.name'),
       cell: (info) => (
-        <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
-          <Link to={`/objects/${info.row.original.id}`} onClick={(event) => event.stopPropagation()}>
-            {info.getValue()}
-          </Link>
-          {info.row.original.is_demo && <DemoBadge />}
+        <span className="flex min-w-40 flex-col items-start gap-1">
+          <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+            <Link to={`/objects/${info.row.original.id}`} onClick={(event) => event.stopPropagation()} className="font-semibold">
+              {info.getValue()}
+            </Link>
+            {info.row.original.is_demo && <DemoBadge />}
+          </span>
+          <span className="text-sm text-text-2">{info.row.original.district_name ?? common('noValue')}</span>
         </span>
       ),
+    }),
+    col.accessor('code', {
+      header: t('list.columns.code'),
+      cell: (info) => <span className="whitespace-nowrap font-mono text-sm tabular-nums text-text-2">{info.getValue()}</span>,
     }),
     col.accessor('developer_name', {
       header: t('list.columns.developer'),
@@ -127,7 +130,7 @@ export function ObjectsPage() {
     }),
     col.display({
       id: 'key_status',
-      header: t('list.columns.keyStatus'),
+      header: t('list.columns.reviewStatus'),
       cell: (info) => keyStatus(info.row.original.key_status, info.row.original.key_status_detail),
     }),
     col.display({
@@ -212,21 +215,6 @@ export function ObjectsPage() {
               }}
             />
           </InputGroup>
-          <ToggleGroup
-            type="single"
-            aria-label={t('list.zoneFilter')}
-            value={zone ?? 'all'}
-            onValueChange={(value) => value && setFilters({ zone: isZone(value) ? value : null })}
-            className="w-full flex-wrap justify-start"
-          >
-            <ToggleGroupItem value="all">{common('all')}</ToggleGroupItem>
-            {ZONES.map((item) => (
-              <ToggleGroupItem key={item} value={item}>
-                <ZoneDot zone={item} size={8} />
-                {e('zone', item)}
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
           <TerritoryFilter
             territoryId={territoryId}
             districtId={districtId}
@@ -250,6 +238,28 @@ export function ObjectsPage() {
             </Button>
           )}
           <ZoneDisclaimer />
+          <details className="border-t border-border pt-3">
+            <summary className="min-h-11 cursor-pointer py-2 font-medium text-text-2 focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+              {t('list.technicalFilters')}
+            </summary>
+            <div className="pt-2">
+              <ToggleGroup
+                type="single"
+                aria-label={t('list.zoneFilter')}
+                value={zone ?? 'all'}
+                onValueChange={(value) => value && setFilters({ zone: isZone(value) ? value : null })}
+                className="w-full flex-wrap justify-start"
+              >
+                <ToggleGroupItem value="all">{common('all')}</ToggleGroupItem>
+                {ZONES.map((item) => (
+                  <ToggleGroupItem key={item} value={item}>
+                    <ZoneDot zone={item} size={8} />
+                    {e('zone', item)}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+            </div>
+          </details>
         </aside>
       </div>
       {canEditRegistry && (

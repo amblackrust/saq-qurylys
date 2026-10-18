@@ -97,7 +97,7 @@ export function ControlPage() {
           pageIndex={pageIndex}
           pageSize={PAGE_SIZE}
           onPageChange={(next) => setQuery({ page: next })}
-          onRowClick={(row) => void navigate(`/objects/${row.object.id}`)}
+          onRowClick={(row) => void navigate(`/objects/${row.object.id}?assignment=${row.id}#assignments`)}
           getRowId={(row) => String(row.id)}
           loading={query.isPending}
           fetching={query.isFetching && !query.isPending}

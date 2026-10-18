@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react';
-import { IconChevronRight, IconTopologyStar3 } from '@tabler/icons-react';
+import { IconChevronRight, IconMap2, IconTopologyStar3 } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 import type { ObjectDetail } from '@/api/types';
@@ -47,6 +47,7 @@ function scrollToHashTarget(id: string) {
 export function ObjectCard({ object }: { object: ObjectDetail }) {
   const { t } = useTranslation('objects');
   const { t: tGraph } = useTranslation('graph');
+  const { t: tMap } = useTranslation('map');
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [section, setSection] = useState<ObjectSection>(() => sectionForHash(window.location.hash) ?? 'review');
   const [hashRevision, setHashRevision] = useState(0);
@@ -152,6 +153,14 @@ export function ObjectCard({ object }: { object: ObjectDetail }) {
                   {tGraph('open')}
                 </Link>
               </Button>
+              {object.lat !== null && object.lon !== null && (
+                <Button asChild variant="secondary" className="min-h-11 self-start">
+                  <Link to={`/map?object_id=${object.id}`}>
+                    <IconMap2 />
+                    {tMap('openObject')}
+                  </Link>
+                </Button>
+              )}
             </div>
           </div>
         )}

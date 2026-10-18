@@ -3,6 +3,7 @@ import type ru from '../ru/map';
 
 const map: typeof ru = {
   title: 'Объектілер картасы',
+  openObject: 'Объектіні картадан көрсету',
   links: {
     signals: 'Сигналдық карточкаларды ашу',
     ads: 'Жарнама лентасы',
