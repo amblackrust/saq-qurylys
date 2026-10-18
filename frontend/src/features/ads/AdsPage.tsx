@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { IconCamera, IconChevronLeft, IconChevronRight, IconPlus, IconRss } from '@tabler/icons-react';
-import { Link, useSearchParams } from 'react-router';
+import { Link, useLocation, useNavigationType, useSearchParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { useAd, useAds, useTriageAd } from '@/api/hooks/ads';
 import type { AdDetail, AdListParams, AdReviewState, AdRow } from '@/api/types';
@@ -40,6 +40,7 @@ function PublicationRow({ ad, selected, queueMode, onSelect }: { ad: AdRow; sele
       type="button"
       aria-pressed={selected}
       aria-label={t('card.label', { id: ad.id })}
+      data-ad-id={ad.id}
       onClick={onSelect}
       className={cn(
         'flex min-h-24 w-full flex-col items-stretch gap-2 border-b border-border px-4 py-3 text-left text-text transition-colors hover:bg-hover focus-visible:relative focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-focus',
@@ -172,13 +173,21 @@ function DuplicateNotice({ ad, onOpenGroup }: { ad: AdRow; onOpenGroup: () => vo
 export function AdsPage() {
   const { t } = useTranslation('ads');
   const { canEditRegistry } = useAuth();
+  const location = useLocation();
   const [params, setParams] = useSearchParams();
+  const navigationType = useNavigationType();
   const [captureOpen, setCaptureOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
   const [triageResult, setTriageResult] = useState<{ id: number; state: AdReviewState } | null>(null);
   const [completedAdId, setCompletedAdId] = useState<number | null>(null);
-  const [pendingPageSelection, setPendingPageSelection] = useState<{ edge: 'first' | 'last'; page: number } | null>(null);
+  const [pendingPageSelection, setPendingPageSelection] = useState<{ edge: 'first' | 'last'; page: number; openDetail: boolean } | null>(null);
+  const [isNarrowLayout, setIsNarrowLayout] = useState(() => !window.matchMedia('(min-width: 64rem)').matches);
   const feedRef = useRef<HTMLDivElement>(null);
+  const mobileListPositionRef = useRef<{ top: number; adId: number } | null>(null);
+  const restoreMobileListPositionRef = useRef(false);
+  const focusedMobileAdIdRef = useRef<number | null>(null);
+  const pendingPageAdCommitRef = useRef<number | null>(null);
+  const pendingPageNavigationRef = useRef<{ originKey: string; committed: boolean } | null>(null);
 
   const filters: AdFilterValues = {
     platform: parsePlatform(params.get('platform')),
@@ -194,6 +203,7 @@ export function AdsPage() {
   const page = parseId(params.get('page')) ?? 1;
   const adId = parseId(params.get('ad'));
   const focusHitId = parseId(params.get('hit'));
+  const mobileDetailRequested = adId !== null || pendingPageSelection?.openDetail === true;
 
   const listParams: AdListParams = duplicateGroup
     ? { duplicate_of: duplicateOf, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }
@@ -222,6 +232,8 @@ export function AdsPage() {
   const edgeAd = edgeSelectionReady && pendingPageSelection?.edge === 'last' ? items.at(-1) : edgeSelectionReady ? items[0] : undefined;
   const selectedAdId = adId ?? completedAdId ?? (pendingPageSelection ? edgeAd?.id ?? null : items[0]?.id ?? null);
   const selectedAd = useAd(selectedAdId);
+  const pinnedPanelRef = useRef<HTMLElement>(null);
+  const previousMobileDetailRequestedRef = useRef(mobileDetailRequested);
   const triageAd = useTriageAd();
   const hasFilters = filters.platform !== null || filters.objectId !== null || filters.status !== null || filters.demo !== null || filters.q.trim() !== '';
   const reviewFilter = reviewState && reviewState !== 'unreviewed' ? reviewState : 'inbox';
@@ -240,16 +252,98 @@ export function AdsPage() {
       return next;
     }, options), [setParams]);
 
+  const startPageSelection = (selection: { edge: 'first' | 'last'; page: number; openDetail: boolean }) => {
+    pendingPageNavigationRef.current = { originKey: location.key, committed: false };
+    setPendingPageSelection(selection);
+  };
+
   useEffect(() => {
-    if (!edgeAd || !pendingPageSelection) return;
+    const mediaQuery = window.matchMedia('(min-width: 64rem)');
+    const updateLayout = () => setIsNarrowLayout(!mediaQuery.matches);
+    updateLayout();
+    mediaQuery.addEventListener('change', updateLayout);
+    return () => mediaQuery.removeEventListener('change', updateLayout);
+  }, []);
+
+  useLayoutEffect(() => {
+    const previousMobileDetailRequested = previousMobileDetailRequestedRef.current;
+    previousMobileDetailRequestedRef.current = mobileDetailRequested;
+    if (previousMobileDetailRequested === mobileDetailRequested || mobileDetailRequested) return;
+
+    const shouldRestorePosition = restoreMobileListPositionRef.current || navigationType === 'POP';
+    restoreMobileListPositionRef.current = false;
+    if (!isNarrowLayout) return;
+
+    const savedPosition = mobileListPositionRef.current;
+    if (shouldRestorePosition && savedPosition) {
+      window.scrollTo({ top: savedPosition.top, behavior: 'auto' });
+      feedRef.current
+        ?.querySelector<HTMLButtonElement>(`[data-ad-id="${savedPosition.adId}"]`)
+        ?.focus({ preventScroll: true });
+      return;
+    }
+
+    feedRef.current?.scrollIntoView({ block: 'start' });
+  }, [isNarrowLayout, mobileDetailRequested, navigationType]);
+
+  useLayoutEffect(() => {
+    if (pendingPageSelection && page === pendingPageSelection.page && pendingPageNavigationRef.current) {
+      pendingPageNavigationRef.current.committed = true;
+    }
+  }, [page, pendingPageSelection]);
+
+  useEffect(() => {
+    if (!pendingPageSelection) return;
+    let active = true;
+    const clearPendingSelection = () => {
+      queueMicrotask(() => {
+        if (active) setPendingPageSelection(null);
+      });
+      return () => { active = false; };
+    };
+
+    if (!edgeAd) return;
+    const shouldOpenDetail = pendingPageSelection.openDetail || !isNarrowLayout;
+    if (!shouldOpenDetail) {
+      pendingPageAdCommitRef.current = null;
+      return clearPendingSelection();
+    }
+
+    if (adId === edgeAd.id) {
+      pendingPageAdCommitRef.current = null;
+      return clearPendingSelection();
+    }
+
+    if (pendingPageAdCommitRef.current !== edgeAd.id) {
+      pendingPageAdCommitRef.current = edgeAd.id;
+      updateParams({ ad: String(edgeAd.id) }, { replace: true });
+    }
+    return () => { active = false; };
+  }, [adId, edgeAd, isNarrowLayout, pendingPageSelection, updateParams]);
+
+  useEffect(() => {
+    if (!pendingPageSelection) {
+      pendingPageAdCommitRef.current = null;
+      pendingPageNavigationRef.current = null;
+    }
+  }, [pendingPageSelection]);
+
+  useEffect(() => {
+    const pendingNavigation = pendingPageNavigationRef.current;
+    const navigationMovedAway = pendingNavigation && (
+      pendingNavigation.committed || location.key !== pendingNavigation.originKey
+    );
+    if (!pendingPageSelection || page === pendingPageSelection.page || !navigationMovedAway) return;
+
     let active = true;
     queueMicrotask(() => {
       if (!active) return;
-      setPendingPageSelection(null);
-      updateParams({ ad: String(edgeAd.id) }, { replace: true });
+      pendingPageAdCommitRef.current = null;
+      pendingPageNavigationRef.current = null;
+      setPendingPageSelection((current) => current?.page === pendingPageSelection.page ? null : current);
     });
     return () => { active = false; };
-  }, [edgeAd, pendingPageSelection, updateParams]);
+  }, [location.key, page, pendingPageSelection]);
 
   const changeFilters = (patch: Partial<AdFilterValues>) => {
     setPendingPageSelection(null);
@@ -263,7 +357,7 @@ export function AdsPage() {
   };
 
   const changePage = (nextPage: number) => {
-    setPendingPageSelection({ edge: 'first', page: nextPage });
+    startPageSelection({ edge: 'first', page: nextPage, openDetail: false });
     setTriageResult(null);
     setCompletedAdId(null);
     updateParams({ page: nextPage > 1 ? String(nextPage) : null, ad: null, hit: null });
@@ -275,6 +369,15 @@ export function AdsPage() {
     setTriageResult(null);
     setCompletedAdId(null);
     updateParams({ ad: String(id), hit: null });
+  };
+  const returnToList = () => {
+    restoreMobileListPositionRef.current = true;
+    setPendingPageSelection(null);
+    pendingPageAdCommitRef.current = null;
+    pendingPageNavigationRef.current = null;
+    setCompletedAdId(null);
+    setTriageResult(null);
+    if (adId !== null || focusHitId !== null) updateParams({ ad: null, hit: null });
   };
   const setQueueMode = (enabled: boolean) => {
     setPendingPageSelection(null);
@@ -348,10 +451,10 @@ export function AdsPage() {
       showAd(items[currentIndex + 1]!.id);
     } else if (selectedIndex === -1 && total > 0) {
       const targetPage = page > pages ? pages : Math.max(1, page - 1);
-      setPendingPageSelection({ edge: 'first', page: targetPage });
+      startPageSelection({ edge: 'first', page: targetPage, openDetail: true });
       updateParams({ page: String(targetPage), ad: null, hit: null });
     } else if (page < pages) {
-      setPendingPageSelection({ edge: 'first', page: page + 1 });
+      startPageSelection({ edge: 'first', page: page + 1, openDetail: true });
       updateParams({ page: String(page + 1), ad: null, hit: null });
     } else {
       updateParams({ ad: null, hit: null });
@@ -363,6 +466,43 @@ export function AdsPage() {
   const hasNextPublication = selectedIndex === -1
     ? items.length > 0 || total > 0
     : selectedIndex < items.length - 1 || page < pages;
+
+  const selectPreviousQueuePublication = () => {
+    if (selectedIndex > 0) showAd(items[selectedIndex - 1]!.id);
+    else if (page > 1) {
+      startPageSelection({ edge: 'last', page: page - 1, openDetail: true });
+      updateParams({ page: String(page - 1), ad: null, hit: null });
+    }
+  };
+
+  const selectNextQueuePublication = () => {
+    if (selectedIndex < items.length - 1) showAd(items[selectedIndex + 1]!.id);
+    else if (page < pages) {
+      startPageSelection({ edge: 'first', page: page + 1, openDetail: true });
+      updateParams({ page: String(page + 1), ad: null, hit: null });
+    }
+  };
+
+  useLayoutEffect(() => {
+    if (pinnedPanelRef.current) pinnedPanelRef.current.scrollTop = 0;
+  }, [selectedAdId]);
+
+  useLayoutEffect(() => {
+    const panel = pinnedPanelRef.current;
+    if (adId === null) {
+      focusedMobileAdIdRef.current = null;
+      return;
+    }
+    if (!isNarrowLayout) {
+      focusedMobileAdIdRef.current = null;
+      return;
+    }
+    if (focusedMobileAdIdRef.current === adId || selectedAd.isPending) return;
+    if (selectedAd.data?.id !== adId && !selectedAd.isError) return;
+    panel?.scrollIntoView({ block: 'start' });
+    panel?.focus({ preventScroll: true });
+    focusedMobileAdIdRef.current = adId;
+  }, [adId, isNarrowLayout, selectedAd.data?.id, selectedAd.isError, selectedAd.isPending]);
 
   return (
     <>
@@ -435,51 +575,79 @@ export function AdsPage() {
         </div>
       )}
 
+      {/* Reserve the sticky gap, expanded-tile outlet padding, and page-shell bottom padding at document end. */}
       <div className="mt-5 grid items-start gap-5 lg:grid-cols-[minmax(18rem,0.72fr)_minmax(0,1.28fr)]">
-        <section ref={feedRef} aria-labelledby="ads-results-title" className="order-2 min-w-0 overflow-hidden rounded-xl border border-border bg-surface lg:order-1" aria-busy={ads.isFetching}>
-          <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-            <h2 id="ads-results-title" className="mb-0 text-lg font-semibold">
-              {duplicateGroup ? t('review.duplicateGroupTitle') : queueMode ? t('review.queueTitle') : t('feed.results')}
-            </h2>
-            {ads.data && <span className="text-sm tabular-nums text-text-2">{total}</span>}
-          </div>
-          {emptyResultsLoading && <FeedSkeleton />}
-          {ads.isError && <ErrorBlock error={ads.error} onRetry={() => void ads.refetch()} />}
-          {showEmptyResults && (
-            <EmptyState
-              action={
-                total > 0 ? (
-                  <Button variant="secondary" size="xs" onClick={() => changePage(1)}>{t('feed.firstPage')}</Button>
-                ) : hasFilters ? (
-                  <Button variant="secondary" size="xs" onClick={resetFilters}>{t('reset', { ns: 'common' })}</Button>
-                ) : !queueMode && canEditRegistry ? (
-                  <div className="flex flex-wrap gap-2">
-                    <Button size="sm" className="max-sm:min-h-11" onClick={() => setCaptureOpen(true)}>{t('actions.capture')}</Button>
-                    <Button className="max-sm:min-h-11" variant="secondary" size="sm" onClick={() => setManualOpen(true)}>{t('actions.manual')}</Button>
-                  </div>
-                ) : undefined
-              }
-            >
-              <strong>{total > 0 ? t('feed.pageEmpty') : queueMode ? t('review.noNext') : t('feed.empty')}</strong>
-              {total === 0 && !queueMode && (
-                <>
-                  <br />
-                  {t('feed.emptyHint')}
-                </>
-              )}
-            </EmptyState>
-          )}
-          {items.map((ad) => (
-            <PublicationRow key={ad.id} ad={ad} selected={ad.id === selectedAdId} queueMode={queueMode} onSelect={() => showAd(ad.id)} />
-          ))}
-        </section>
+        <div className={cn('order-2 min-w-0 lg:order-1', mobileDetailRequested && 'max-lg:hidden')}>
+          <section
+            ref={feedRef}
+            data-testid="ads-list-panel"
+            aria-labelledby="ads-results-title"
+            className="min-w-0 scroll-mt-[calc(var(--header-h)_+_1rem)] overflow-hidden rounded-xl border border-border bg-surface"
+            aria-busy={ads.isFetching}
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+              <h2 id="ads-results-title" className="mb-0 text-lg font-semibold">
+                {duplicateGroup ? t('review.duplicateGroupTitle') : queueMode ? t('review.queueTitle') : t('feed.results')}
+              </h2>
+              {ads.data && <span className="text-sm tabular-nums text-text-2">{total}</span>}
+            </div>
+            {emptyResultsLoading && <FeedSkeleton />}
+            {ads.isError && <ErrorBlock error={ads.error} onRetry={() => void ads.refetch()} />}
+            {showEmptyResults && (
+              <EmptyState
+                action={
+                  total > 0 ? (
+                    <Button variant="secondary" size="xs" onClick={() => changePage(1)}>{t('feed.firstPage')}</Button>
+                  ) : hasFilters ? (
+                    <Button variant="secondary" size="xs" onClick={resetFilters}>{t('reset', { ns: 'common' })}</Button>
+                  ) : !queueMode && canEditRegistry ? (
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" className="max-sm:min-h-11" onClick={() => setCaptureOpen(true)}>{t('actions.capture')}</Button>
+                      <Button className="max-sm:min-h-11" variant="secondary" size="sm" onClick={() => setManualOpen(true)}>{t('actions.manual')}</Button>
+                    </div>
+                  ) : undefined
+                }
+              >
+                <strong>{total > 0 ? t('feed.pageEmpty') : queueMode ? t('review.noNext') : t('feed.empty')}</strong>
+                {total === 0 && !queueMode && (
+                  <>
+                    <br />
+                    {t('feed.emptyHint')}
+                  </>
+                )}
+              </EmptyState>
+            )}
+            {items.map((ad) => (
+              <PublicationRow
+                key={ad.id}
+                ad={ad}
+                selected={ad.id === selectedAdId}
+                queueMode={queueMode}
+                onSelect={() => {
+                  if (isNarrowLayout && adId === null) mobileListPositionRef.current = { top: window.scrollY, adId: ad.id };
+                  showAd(ad.id);
+                }}
+              />
+            ))}
+          </section>
+          {items.length > 0 && <AdsPager page={page} total={total} onPageChange={changePage} />}
+        </div>
 
-        <section aria-label={t('feed.pinned')} className="order-1 min-w-0 lg:sticky lg:top-[calc(var(--header-h)+16px)] lg:order-2">
-          {selectedAdId !== null && (
+        <section
+          ref={pinnedPanelRef}
+          data-testid="ads-details-panel"
+          aria-label={t('feed.pinned')}
+          tabIndex={-1}
+          className={cn('order-1 min-w-0 scroll-mt-[calc(var(--header-h)_+_1rem)] lg:sticky lg:top-[calc(var(--header-h)_+_1rem)] lg:max-h-[calc(100dvh_-_var(--header-h)_-_5.5rem)] lg:min-h-0 lg:overflow-y-auto lg:order-2', !mobileDetailRequested && 'max-lg:hidden')}
+        >
+          {(selectedAdId !== null || mobileDetailRequested) && (
             <div className="mb-2 flex min-h-10 items-center justify-between gap-3 border-b border-border pb-2">
               <h2 className="mb-0 text-lg font-semibold">{queueMode ? t('review.queueTitle') : t('feed.pinned')}</h2>
+              {mobileDetailRequested && (
+                <Button data-testid="ads-mobile-back-to-list" className="lg:hidden min-h-11" variant="ghost" size="xs" onClick={returnToList}>{t('feed.backToList')}</Button>
+              )}
               {adId !== null && (
-              <Button variant="ghost" size="xs" onClick={() => { setCompletedAdId(null); setTriageResult(null); updateParams({ ad: null, hit: null }); }}>{t('feed.unpin')}</Button>
+                <Button className="max-lg:hidden" variant="ghost" size="xs" onClick={() => { setCompletedAdId(null); setTriageResult(null); updateParams({ ad: null, hit: null }); }}>{t('feed.unpin')}</Button>
               )}
             </div>
           )}
@@ -495,13 +663,7 @@ export function AdsPage() {
                     size="icon-sm"
                     aria-label={t('review.previous')}
                     disabled={selectedIndex <= 0 && page <= 1}
-                    onClick={() => {
-                      if (selectedIndex > 0) showAd(items[selectedIndex - 1]!.id);
-                      else if (page > 1) {
-                        setPendingPageSelection({ edge: 'last', page: page - 1 });
-                        updateParams({ page: String(page - 1), ad: null, hit: null });
-                      }
-                    }}
+                    onClick={selectPreviousQueuePublication}
                   >
                     <IconChevronLeft />
                   </Button>
@@ -510,13 +672,7 @@ export function AdsPage() {
                     size="icon-sm"
                     aria-label={t('review.next')}
                     disabled={selectedIndex >= items.length - 1 && page >= pages}
-                    onClick={() => {
-                      if (selectedIndex < items.length - 1) showAd(items[selectedIndex + 1]!.id);
-                      else if (page < pages) {
-                        setPendingPageSelection({ edge: 'first', page: page + 1 });
-                        updateParams({ page: String(page + 1), ad: null, hit: null });
-                      }
-                    }}
+                    onClick={selectNextQueuePublication}
                   >
                     <IconChevronRight />
                   </Button>
@@ -525,6 +681,7 @@ export function AdsPage() {
             );
           })()}
           {selectedAdId === null && (emptyResultsLoading || (pendingPageSelection && (ads.isFetching || ads.isPlaceholderData))) && <FeedSkeleton count={1} />}
+          {selectedAdId === null && mobileDetailRequested && ads.isError && <ErrorBlock error={ads.error} onRetry={() => void ads.refetch()} />}
           {selectedAdId === null && showEmptyResults && <EmptyState>{queueMode ? t('review.noNext') : t('feed.empty')}</EmptyState>}
           {selectedAdId !== null && selectedAd.isPending && <FeedSkeleton count={1} />}
           {selectedAd.isError && <ErrorBlock error={selectedAd.error} onRetry={() => void selectedAd.refetch()} />}
@@ -564,8 +721,6 @@ export function AdsPage() {
           )}
         </section>
       </div>
-
-      {items.length > 0 && <AdsPager page={page} total={total} onPageChange={changePage} />}
 
       {canEditRegistry && (
         <>

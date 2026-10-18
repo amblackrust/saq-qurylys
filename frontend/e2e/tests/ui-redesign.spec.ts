@@ -524,6 +524,7 @@ interface MockState {
   ads: AdDetail[];
   triageFailure?: { state: AdReviewState; code: string; message: string };
   adListFailure?: { code: string; message: string };
+  adListDelayMs?: number;
   assignmentFailureAfterFirst?: { code: string; message: string };
   failReturnedCount?: number;
   exportFailurePaths?: string[];
@@ -859,6 +860,7 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
       const total = rows.length;
       const offset = Number(url.searchParams.get('offset') ?? 0);
       const limit = Number(url.searchParams.get('limit') ?? rows.length);
+      if (state.adListDelayMs) await new Promise((resolve) => setTimeout(resolve, state.adListDelayMs));
       return json(route, { items: rows.slice(offset, offset + limit), total });
     }
     if (method === 'GET' && /^\/ads\/\d+$/.test(path)) {
@@ -1276,6 +1278,18 @@ test('role landings and navigation preserve recipient registry restrictions', as
     await page.goto('/');
     const recipient = role === 'gask' || role === 'law_enforcement';
     await expect(page).toHaveURL(recipient ? /\/signals$/ : /\/home$/);
+    if (role === 'admin') {
+      await screenshot(page, 'home-admin-1440-ru');
+      await page.setViewportSize({ width: 320, height: 844 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+      await screenshot(page, 'home-admin-320-ru');
+      await selectLanguage(page, 'kk');
+      await expect(page.locator('html')).toHaveAttribute('lang', 'kk');
+      await screenshot(page, 'home-admin-320-kk');
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await screenshot(page, 'home-admin-1440-kk');
+      await selectLanguage(page, 'ru');
+    }
     const nav = page.getByRole('navigation', { name: t('nav.primaryNavigation') });
     if (recipient) {
       await expect(nav.getByTestId('bento-nav-card-signals')).toBeVisible();
@@ -2282,6 +2296,261 @@ test('ads review queue keeps server defaults, guards completion, and advances th
   expectCleanBrowser(harness);
 });
 
+test('desktop ad selection keeps the deep list position and bounds long details to the sticky pane', async ({ page }) => {
+  const longText = Array.from({ length: 72 }, (_, index) =>
+    `Scroll fixture paragraph ${index + 1}: проверяем выбранную публикацию в длинном списке без потери контекста.`,
+  ).join('\n');
+  const ads = Array.from({ length: 20 }, (_, index) => makeReviewAd(500 + index, {
+    author: `@scroll_fixture_${index + 1}`,
+    text: index === 19 ? longText : `Scroll fixture publication ${index + 1}`,
+    review_state: 'unreviewed',
+    queue_reasons: ['manual_review'],
+  }));
+  const harness = await installMocks(page, 'mio_officer', { ads });
+  await page.setViewportSize({ width: 1440, height: 768 });
+  await page.goto('/ads?queue=true&platform=instagram&is_demo=false&q=fixture');
+
+  const list = page.getByTestId('ads-list-panel');
+  const details = page.getByTestId('ads-details-panel');
+  const lastRow = list.locator('[data-ad-id="519"]');
+  await expect(lastRow).toBeVisible();
+  await lastRow.scrollIntoViewIfNeeded();
+  const listPosition = await page.evaluate(() => window.scrollY);
+  expect(listPosition).toBeGreaterThan(0);
+  await lastRow.click();
+
+  await expect(page).toHaveURL(/ad=519/);
+  const selectedArticle = page.getByRole('article', { name: t('ads:card.label', { id: 519 }) });
+  await expect(selectedArticle).toBeVisible();
+  await selectedArticle.getByRole('button', { name: t('ads:text.expand') }).click();
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(listPosition);
+  const visiblePane = await page.evaluate(() => {
+    const header = document.querySelector<HTMLElement>('[data-app-header]');
+    const pane = document.querySelector<HTMLElement>('[data-testid="ads-details-panel"]');
+    const article = pane?.querySelector<HTMLElement>('article[aria-label]');
+    const list = document.querySelector<HTMLElement>('[data-testid="ads-list-panel"]');
+    if (!header || !pane || !article || !list) throw new Error('Missing app header, publication list, details pane, or selected article');
+    const headerBounds = header.getBoundingClientRect();
+    const paneBounds = pane.getBoundingClientRect();
+    const articleBounds = article.getBoundingClientRect();
+    const listBounds = list.getBoundingClientRect();
+    return {
+      documentScrollY: window.scrollY,
+      headerBottom: headerBounds.bottom,
+      listTop: listBounds.top,
+      listBottom: listBounds.bottom,
+      paneTop: paneBounds.top,
+      paneBottom: paneBounds.bottom,
+      viewportHeight: window.innerHeight,
+      paneClientHeight: pane.clientHeight,
+      paneScrollHeight: pane.scrollHeight,
+      paneScrollTop: pane.scrollTop,
+      articleTop: articleBounds.top,
+      previousButtonTop: pane.querySelector<HTMLElement>('[aria-label="Предыдущая публикация"]')?.getBoundingClientRect().top,
+      nextButtonTop: pane.querySelector<HTMLElement>('[aria-label="Следующая публикация"]')?.getBoundingClientRect().top,
+    };
+  });
+  expect(visiblePane.paneTop).toBeGreaterThanOrEqual(visiblePane.headerBottom);
+  expect(visiblePane.paneBottom).toBeLessThanOrEqual(visiblePane.viewportHeight);
+  expect(visiblePane.articleTop).toBeGreaterThanOrEqual(visiblePane.headerBottom);
+  expect(visiblePane.previousButtonTop).toBeGreaterThanOrEqual(visiblePane.headerBottom);
+  expect(visiblePane.nextButtonTop).toBeGreaterThanOrEqual(visiblePane.headerBottom);
+  expect(visiblePane.paneScrollHeight).toBeGreaterThan(visiblePane.paneClientHeight);
+  expect(visiblePane.paneScrollTop).toBe(0);
+  await screenshot(page, 'ads-scroll-desktop-selected-1440x768', false);
+  await test.info().attach('ads-scroll-desktop-metrics.json', {
+    body: Buffer.from(JSON.stringify({ listPosition, ...visiblePane }, null, 2)),
+    contentType: 'application/json',
+  });
+  await writeFile(`${screenshotDir}/ads-scroll-desktop-metrics.json`, JSON.stringify({ listPosition, ...visiblePane }, null, 2));
+  await details.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await expect.poll(() => details.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+
+  const adjacentRow = list.locator('[data-ad-id="518"]');
+  await adjacentRow.click();
+  await expect(page).toHaveURL(/ad=518/);
+  await expect(page.getByRole('article', { name: t('ads:card.label', { id: 518 }) })).toBeVisible();
+  await expect.poll(() => details.evaluate((element) => element.scrollTop)).toBe(0);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(listPosition);
+  const query = new URL(page.url()).searchParams;
+  expect(query.get('queue')).toBe('true');
+  expect(query.get('platform')).toBe('instagram');
+  expect(query.get('is_demo')).toBe('false');
+  expect(query.get('q')).toBe('fixture');
+  expect(harness.mutations).toEqual([]);
+  expectCleanBrowser(harness);
+});
+
+test('narrow ad selection is a URL-backed detail step that restores the filtered list and focus', async ({ page }) => {
+  const longText = Array.from({ length: 36 }, (_, index) =>
+    `Scroll fixture paragraph ${index + 1}: содержимое публикации остаётся доступным в отдельном экране.`,
+  ).join('\n');
+  const ads = Array.from({ length: 20 }, (_, index) => makeReviewAd(500 + index, {
+    author: `@scroll_fixture_${index + 1}`,
+    text: index === 19 ? longText : `Scroll fixture publication ${index + 1}`,
+    review_state: 'unreviewed',
+    queue_reasons: ['manual_review'],
+  }));
+  const harness = await installMocks(page, 'mio_officer', { ads });
+
+  for (const width of [768, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto('/ads?queue=true&platform=instagram&is_demo=false&q=fixture');
+    const list = page.getByTestId('ads-list-panel');
+    const details = page.getByTestId('ads-details-panel');
+    const lastRow = list.locator('[data-ad-id="519"]');
+    await expect(lastRow).toBeVisible();
+    await expect(details).toBeHidden();
+    await lastRow.scrollIntoViewIfNeeded();
+    const priorListPosition = await page.evaluate(() => window.scrollY);
+    expect(priorListPosition).toBeGreaterThan(0);
+    await lastRow.click();
+
+    await expect.poll(() => new URL(page.url()).searchParams.get('ad')).toBe('519');
+    await expect(list).toBeHidden();
+    await expect(details).toBeVisible();
+    const selectedArticle = page.getByRole('article', { name: t('ads:card.label', { id: 519 }) });
+    await expect(selectedArticle).toBeVisible();
+    await expect(details).toBeFocused();
+    await selectedArticle.getByRole('button', { name: t('ads:text.expand') }).click();
+    const detailBounds = await page.evaluate(() => {
+      const header = document.querySelector<HTMLElement>('[data-app-header]');
+      const pane = document.querySelector<HTMLElement>('[data-testid="ads-details-panel"]');
+      if (!header || !pane) throw new Error('Missing app header or publication details pane');
+      return {
+        documentScrollY: window.scrollY,
+        headerBottom: header.getBoundingClientRect().bottom,
+        paneTop: pane.getBoundingClientRect().top,
+        paneBottom: pane.getBoundingClientRect().bottom,
+      };
+    });
+    expect(detailBounds.paneTop).toBeGreaterThanOrEqual(detailBounds.headerBottom - 1);
+    if (width === 390) {
+      await screenshot(page, 'ads-mobile-detail-selected-390', false);
+      await test.info().attach('ads-mobile-detail-metrics.json', {
+        body: Buffer.from(JSON.stringify({ width, priorListPosition, ...detailBounds }, null, 2)),
+        contentType: 'application/json',
+      });
+      await writeFile(`${screenshotDir}/ads-mobile-detail-metrics.json`, JSON.stringify({ width, priorListPosition, ...detailBounds }, null, 2));
+    }
+    await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }));
+    const detailPageScroll = await page.evaluate(() => window.scrollY);
+    expect(detailPageScroll).toBeGreaterThan(0);
+    expect(await details.evaluate((element) => element.scrollHeight)).toBeLessThanOrEqual(await details.evaluate((element) => element.clientHeight) + 1);
+
+    await page.goBack();
+    await expect.poll(() => new URL(page.url()).searchParams.has('ad')).toBe(false);
+    await expect(list).toBeVisible();
+    await expect(details).toBeHidden();
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(priorListPosition);
+    await expect(list.locator('[data-ad-id="519"]')).toBeFocused();
+    if (width === 390) await screenshot(page, 'ads-mobile-list-restored-390', false);
+    let query = new URL(page.url()).searchParams;
+    expect(query.get('queue')).toBe('true');
+    expect(query.get('platform')).toBe('instagram');
+    expect(query.get('is_demo')).toBe('false');
+    expect(query.get('q')).toBe('fixture');
+
+    await page.goForward();
+    await expect.poll(() => new URL(page.url()).searchParams.get('ad')).toBe('519');
+    await expect(details).toBeVisible();
+    await page.getByTestId('ads-mobile-back-to-list').click();
+    await expect.poll(() => new URL(page.url()).searchParams.has('ad')).toBe(false);
+    await expect(list.locator('[data-ad-id="519"]')).toBeFocused();
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(priorListPosition);
+    query = new URL(page.url()).searchParams;
+    expect(query.get('queue')).toBe('true');
+    expect(query.get('platform')).toBe('instagram');
+    expect(query.get('is_demo')).toBe('false');
+    expect(query.get('q')).toBe('fixture');
+
+    await page.goto('/ads?queue=true&platform=instagram&is_demo=false&q=fixture&ad=519');
+    await expect(list).toBeHidden();
+    await expect(details).toBeVisible();
+    await expect(page.getByRole('article', { name: t('ads:card.label', { id: 519 }) })).toBeVisible();
+    await page.getByTestId('ads-mobile-back-to-list').click();
+    await expect.poll(() => new URL(page.url()).searchParams.has('ad')).toBe(false);
+    await expect(list).toBeVisible();
+    query = new URL(page.url()).searchParams;
+    expect(query.get('queue')).toBe('true');
+    expect(query.get('platform')).toBe('instagram');
+    expect(query.get('is_demo')).toBe('false');
+    expect(query.get('q')).toBe('fixture');
+  }
+
+  expect(harness.mutations).toEqual([]);
+  expectCleanBrowser(harness);
+});
+
+test('mobile queue boundary keeps its detail step stable while loading but ordinary paging stays on the list', async ({ page }) => {
+  const ads = Array.from({ length: 21 }, (_, index) => makeReviewAd(index + 1, {
+    review_state: 'unreviewed',
+    queue_reasons: ['manual_review'],
+  }));
+  const harness = await installMocks(page, 'mio_officer', { ads });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/ads?queue=true&page=2&ad=21');
+  const list = page.getByTestId('ads-list-panel');
+  const details = page.getByTestId('ads-details-panel');
+  const pagination = page.getByRole('navigation', { name: t('ads:feed.pagination') });
+  await expect(page.getByRole('article', { name: t('ads:card.label', { id: 21 }) })).toBeVisible();
+  await expect(list).toBeHidden();
+  await expect(pagination).toBeHidden();
+
+  harness.state.adListDelayMs = 1200;
+  await page.getByRole('button', { name: t('ads:review.previous') }).click();
+  await expect.poll(() => harness.adListRequests.some((url) => url.searchParams.get('offset') === '0')).toBe(true);
+  await expect(details).toBeVisible();
+  await expect(list).toBeHidden();
+  await expect(pagination).toBeHidden();
+  await expect.poll(() => new URL(page.url()).searchParams.get('ad')).toBe('20');
+  await expect(page.getByRole('article', { name: t('ads:card.label', { id: 20 }) })).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByRole('article', { name: t('ads:card.label', { id: 20 }) })).toBeVisible();
+  await expect(page.getByRole('button', { name: t('ads:review.next') })).toBeEnabled();
+  const priorSecondPageRequests = harness.adListRequests.filter((url) => url.searchParams.get('offset') === '20').length;
+  await page.getByRole('button', { name: t('ads:review.next') }).click();
+  await expect.poll(() => harness.adListRequests.filter((url) => url.searchParams.get('offset') === '20').length).toBeGreaterThan(priorSecondPageRequests);
+  await expect(details).toBeVisible();
+  await expect(list).toBeHidden();
+  await expect(pagination).toBeHidden();
+  await expect.poll(() => new URL(page.url()).searchParams.get('ad')).toBe('21');
+  await expect(page.getByRole('article', { name: t('ads:card.label', { id: 21 }) })).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByRole('article', { name: t('ads:card.label', { id: 21 }) })).toBeVisible();
+  await expect(page.getByRole('button', { name: t('ads:review.previous') })).toBeEnabled();
+  const priorCanceledPageRequests = harness.adListRequests.filter((url) => url.searchParams.get('offset') === '0').length;
+  await page.getByRole('button', { name: t('ads:review.previous') }).click();
+  await expect.poll(() => harness.adListRequests.filter((url) => url.searchParams.get('offset') === '0').length).toBeGreaterThan(priorCanceledPageRequests);
+  await expect(details).toBeVisible();
+  await expect(list).toBeHidden();
+  await page.getByTestId('ads-mobile-back-to-list').click();
+  await expect(page).toHaveURL('/ads?queue=true&page=1');
+  await expect(details).toBeHidden();
+  await expect(list).toBeVisible();
+  await page.waitForTimeout(1300);
+  await expect(details).toBeHidden();
+  await expect(list).toBeVisible();
+
+  await page.goto('/ads?queue=true&page=1&object_id=7');
+  await expect(page.getByRole('button', { name: t('ads:card.label', { id: 1 }), exact: true })).toBeVisible();
+  await expect(list).toBeVisible();
+  await expect(details).toBeHidden();
+  await expect(pagination).toBeVisible();
+  await page.getByRole('button', { name: t('pagination.next') }).click();
+  await expect.poll(() => harness.adListRequests.some((url) => url.searchParams.get('object_id') === '7' && url.searchParams.get('offset') === '20')).toBe(true);
+  await expect(list).toBeVisible();
+  await expect(details).toBeHidden();
+  await expect(pagination).toBeVisible();
+  await expect.poll(() => new URL(page.url()).searchParams.get('page')).toBe('2');
+  await expect(page.getByRole('button', { name: t('ads:card.label', { id: 21 }) })).toBeVisible();
+  expect(new URL(page.url()).searchParams.has('ad')).toBe(false);
+  expect(harness.mutations).toEqual([]);
+  expectCleanBrowser(harness);
+});
+
 test('queue boundary navigation selects the actual previous-page last row and never shows an off-filter ordinal', async ({ page }) => {
   const ads = Array.from({ length: 21 }, (_, index) => makeReviewAd(index + 1, {
     review_state: 'unreviewed',
@@ -2509,7 +2778,7 @@ test('disabled collectors route staff to manual ad entry without starting a coll
   await expect(page.getByRole('link', { name: 'Добавить рекламу по ссылке или вручную' })).toHaveAttribute('href', '/ads');
   await page.getByRole('link', { name: 'Добавить рекламу по ссылке или вручную' }).click();
   await expect(page).toHaveURL(/\/ads$/);
-  await expect(page.getByRole('region', { name: 'Открытая публикация' }).getByText('Рекламных публикаций пока нет')).toBeVisible();
+  await expect(page.getByTestId('ads-list-panel').getByText('Рекламных публикаций пока нет')).toBeVisible();
   await page.getByRole('button', { name: 'Добавить вручную' }).first().click();
   await expect(page.getByRole('dialog').getByRole('heading', { name: 'Добавить публикацию вручную' })).toBeVisible();
   await screenshot(page, 'ads-manual-entry');

@@ -34,7 +34,6 @@ function homeGridClass(item: NavigationEntry, itemCount: number) {
 }
 
 const compactGridClass = 'col-span-6 sm:col-span-4 xl:col-span-2';
-const bentoTransition = { layout: { duration: 0.36, ease: [0.22, 1, 0.36, 1] as const } };
 
 export function BentoNavigation({ headerUtilities, assistantOpen }: BentoNavigationProps) {
   const { t } = useTranslation();
@@ -101,9 +100,9 @@ export function BentoNavigation({ headerUtilities, assistantOpen }: BentoNavigat
       <Suspense fallback={<LoadingBlock />}>
         <motion.div
           key={navigationKey}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+          initial={{ opacity: 0, y: 5 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
         >
           <Outlet context={{ entries, group } satisfies NavigationOutletContext} />
         </motion.div>
@@ -144,9 +143,12 @@ export function BentoNavigation({ headerUtilities, assistantOpen }: BentoNavigat
 
       <div data-print="main-shell" className={cn(assistantOpen && 'min-[62em]:pr-(--assistant-w)')}>
         <main className="mx-auto min-h-[calc(100dvh-var(--header-h))] max-w-(--page-max) px-(--gutter) pt-5 pb-14 sm:pt-7">
-          <MotionConfig reducedMotion="user" transition={bentoTransition}>
+          <MotionConfig reducedMotion="user">
             <LayoutGroup id="bento-navigation">
-              <div data-testid="bento-navigation" className="flex min-w-0 flex-col gap-2 sm:gap-5">
+              <div
+                data-testid="bento-navigation"
+                className={cn('bento-navigation flex min-w-0 flex-col', isHome ? 'gap-0' : 'gap-2 sm:gap-5')}
+              >
                 {isHome && renderOutlet()}
 
                 <nav

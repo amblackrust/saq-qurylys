@@ -32,6 +32,7 @@ const ads: typeof ru = {
     pageEmpty: 'Бұл бетте жарияланымдар жоқ',
     firstPage: 'Бірінші бетке',
     pinned: 'Ашық жарияланым',
+    backToList: 'Тізімге қайту',
     unpin: 'Карточканы жасыру',
     pagination: 'Жарияланымдар беттері',
   },

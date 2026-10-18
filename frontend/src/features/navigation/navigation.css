@@ -1,6 +1,43 @@
 /* A compact rail keeps the available sections visible above the active page. */
+.bento-navigation {
+  --bento-work-surface: #242020;
+  --bento-work-hover: #302c2b;
+  --bento-featured-surface: #872f46;
+  --bento-featured-hover: #96384f;
+  --bento-inverse-ink: #fff;
+  --bento-inverse-focus: #fff;
+}
+
 .bento-section-nav__items {
   display: contents;
+}
+
+.bento-navigation__link[data-nav-tone='work'],
+.bento-navigation__link[data-nav-tone='featured'] {
+  color: var(--bento-inverse-ink);
+}
+
+.bento-navigation__link[data-nav-tone='work']:focus-visible,
+.bento-navigation__link[data-nav-tone='featured']:focus-visible {
+  --tw-ring-color: var(--bento-inverse-focus);
+}
+
+.bento-navigation__link[data-nav-tone='work'] {
+  background-color: var(--bento-work-surface);
+}
+
+.bento-navigation__link[data-nav-tone='featured'] {
+  background-color: var(--bento-featured-surface);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .bento-navigation__link[data-nav-tone='work']:hover {
+    background-color: var(--bento-work-hover);
+  }
+
+  .bento-navigation__link[data-nav-tone='featured']:hover {
+    background-color: var(--bento-featured-hover);
+  }
 }
 
 .bento-section-nav.bento-section-nav--compact {

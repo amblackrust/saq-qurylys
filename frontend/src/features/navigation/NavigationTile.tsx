@@ -20,10 +20,14 @@ interface NavigationTileProps {
   className?: string;
 }
 
-function toneClasses(item: NavigationEntry) {
-  if (item.id === 'adsQueue') return 'bg-primary/10 text-text';
-  if (item.id === 'explore') return 'bg-surface-sunken text-text';
-  return 'bg-surface-raised text-text';
+const bentoLayoutTransition = {
+  layout: { type: 'spring' as const, stiffness: 420, damping: 38, mass: 1 },
+};
+
+function navigationTone(item: NavigationEntry) {
+  if (item.id === 'work') return 'work';
+  if (item.id === 'adsQueue' || item.id === 'admin') return 'featured';
+  return undefined;
 }
 
 export function NavigationTile({
@@ -40,6 +44,7 @@ export function NavigationTile({
 }: NavigationTileProps) {
   const isExpanded = mode === 'expanded';
   const secondaryHomeTile = mode === 'home' && item.id !== 'work' && item.id !== 'adsQueue';
+  const tone = navigationTone(item);
   const tileContents = isExpanded ? (
     <>
       <IconArrowLeft className="size-4 shrink-0" aria-hidden="true" />
@@ -75,7 +80,7 @@ export function NavigationTile({
     <motion.article
       layout
       layoutId={`bento-card-${item.id}`}
-      transition={{ layout: { duration: 0.36, ease: [0.22, 1, 0.36, 1] } }}
+      transition={bentoLayoutTransition}
       id={isExpanded ? 'bento-section-panel' : undefined}
       data-testid={isExpanded ? 'bento-section-panel' : undefined}
       data-current={current ? 'true' : undefined}
@@ -83,8 +88,9 @@ export function NavigationTile({
       aria-label={current ? item.label : undefined}
       aria-current={current ? (expanded ? 'location' : 'page') : undefined}
       className={cn(
-        'group min-w-0 overflow-hidden rounded-[clamp(1.1rem,1.8vw,1.7rem)] border border-border shadow-1',
-        'bg-surface text-text',
+        'group min-w-0 rounded-[clamp(1.1rem,1.8vw,1.7rem)] border border-border shadow-1',
+        isExpanded ? 'overflow-clip' : 'overflow-hidden',
+        'bg-surface-raised text-text',
         current && 'border-primary/45 shadow-2',
         mode === 'home' && 'min-h-40 sm:min-h-48 lg:min-h-52',
         mode === 'compact' && 'min-h-[5.5rem] sm:min-h-24',
@@ -97,12 +103,13 @@ export function NavigationTile({
         ref={focusRef}
         to={isExpanded ? returnTo : item.to}
         data-testid={testId}
+        data-nav-tone={tone}
         aria-current={current && !isExpanded ? (expanded ? 'location' : 'page') : undefined}
         aria-expanded={expanded ? true : undefined}
         aria-controls={expanded ? 'bento-leaf-navigation' : undefined}
         className={cn(
           'bento-navigation__link flex min-w-0 items-start gap-3 text-inherit no-underline outline-none transition-[background-color,color,transform] duration-150 ease-out active:scale-[.99] motion-reduce:transform-none motion-reduce:transition-none',
-          !isExpanded && toneClasses(item),
+          !isExpanded && 'bg-surface-raised text-text',
           'focus-visible:z-10 focus-visible:rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus',
           mode === 'home' && 'h-full min-h-40 p-5 sm:min-h-48 sm:p-6 lg:min-h-52 lg:p-7',
           secondaryHomeTile && 'relative flex-col',

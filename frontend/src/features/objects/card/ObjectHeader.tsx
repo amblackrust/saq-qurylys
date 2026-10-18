@@ -30,34 +30,10 @@ export function ObjectHeader({ object }: { object: ObjectDetail }) {
         {t('card.back')}
       </Link>
 
-      <div className="flex flex-wrap items-end justify-between gap-4">
+      <div className="flex min-w-0 flex-col items-start gap-3">
         <div className="min-w-0">
           <p className="mb-1.5 font-mono text-sm font-medium tracking-wide text-text-2">{object.code}</p>
           <h1 className="text-2xl font-bold [overflow-wrap:anywhere]">{object.name}</h1>
-        </div>
-        <div data-print="hide" className="flex flex-wrap items-center gap-2">
-          <DossierButton objectId={object.id} code={object.code} />
-          <Button className="min-h-11" variant="secondary" onClick={() => window.print()}>
-            <IconPrinter />
-            {t('common:print')}
-          </Button>
-          {canEditRegistry && (
-            <Button
-              className="min-h-11"
-              variant="secondary"
-              loading={recalculate.isPending}
-              onClick={() => recalculate.mutate(object.id)}
-            >
-              <IconRefresh />
-              {t('card.header.recalculate')}
-            </Button>
-          )}
-          {canEditRegistry && (
-            <Button className="min-h-11" variant="secondary" onClick={() => setEditing(true)}>
-              <IconPencil />
-              {t('card.header.edit')}
-            </Button>
-          )}
         </div>
       </div>
 
@@ -72,6 +48,31 @@ export function ObjectHeader({ object }: { object: ObjectDetail }) {
         </span>
         {object.next_check_at && (
           <span className="text-sm text-text-2">{t('card.header.nextCheck', { value: dateTime(object.next_check_at) })}</span>
+        )}
+      </div>
+
+      <div data-print="hide" className="flex max-w-full flex-wrap items-center gap-2">
+        <DossierButton objectId={object.id} code={object.code} />
+        <Button className="min-h-11" variant="secondary" onClick={() => window.print()}>
+          <IconPrinter />
+          {t('common:print')}
+        </Button>
+        {canEditRegistry && (
+          <Button
+            className="min-h-11"
+            variant="secondary"
+            loading={recalculate.isPending}
+            onClick={() => recalculate.mutate(object.id)}
+          >
+            <IconRefresh />
+            {t('card.header.recalculate')}
+          </Button>
+        )}
+        {canEditRegistry && (
+          <Button className="min-h-11" variant="secondary" onClick={() => setEditing(true)}>
+            <IconPencil />
+            {t('card.header.edit')}
+          </Button>
         )}
       </div>
 
