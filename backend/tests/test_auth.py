@@ -1,8 +1,14 @@
 from datetime import UTC, datetime, timedelta
 
+import jwt
+import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from app.security import create_access_token
+from app.config import get_settings
+from app.models import AuditLog
+from app.security import JWT_ALGORITHM, create_access_token
 from tests.conftest import PASSWORD, World, auth
 
 
@@ -41,7 +47,7 @@ def test_inactive_user_cannot_login_or_use_token(client: TestClient, world: Worl
 def test_missing_malformed_and_expired_tokens(client: TestClient, world: World) -> None:
     assert client.get("/api/v1/auth/me").json()["detail"]["code"] == "not_authenticated"
     assert client.get("/api/v1/auth/me", headers={"Authorization": "Bearer garbage"}).status_code == 401
-    expired = create_access_token(world.users["admin"].id, now=datetime.now(UTC) - timedelta(days=2))
+    expired = create_access_token(world.users["admin"].id, 0, now=datetime.now(UTC) - timedelta(days=2))
     response = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {expired}"})
     assert response.status_code == 401
     assert response.json()["detail"]["code"] == "invalid_token"
@@ -51,3 +57,83 @@ def test_validation_errors_use_contract_format(client: TestClient) -> None:
     response = client.post("/api/v1/auth/login", json={"username": "x"})
     assert response.status_code == 422
     assert response.json()["detail"]["code"] == "validation_error"
+
+
+def test_login_is_blocked_after_repeated_failures(
+    client: TestClient, world: World, monkeypatch: pytest.MonkeyPatch, db: Session
+) -> None:
+    monkeypatch.setattr(get_settings(), "login_max_failures_per_user", 3)
+    for _ in range(3):
+        response = client.post("/api/v1/auth/login", json={"username": "t_admin", "password": "wrong"})
+        assert response.status_code == 401
+    # The correct password is not even checked while the account is blocked.
+    blocked = client.post("/api/v1/auth/login", json={"username": "t_admin", "password": PASSWORD})
+    assert blocked.status_code == 429
+    assert blocked.json()["detail"]["code"] == "too_many_attempts"
+    assert 0 < int(blocked.headers["Retry-After"]) <= get_settings().login_lockout_minutes * 60
+    # Other accounts are not affected (the per-address limit is far higher).
+    other = client.post("/api/v1/auth/login", json={"username": "t_gask", "password": PASSWORD})
+    assert other.status_code == 200
+
+    failures = db.scalars(select(AuditLog).where(AuditLog.action == "auth.login_failed")).all()
+    assert len(failures) == 3
+    assert {entry.entity_id for entry in failures} == {world.users["admin"].id}
+    assert failures[0].after == {"username": "t_admin"}
+
+
+def test_login_is_blocked_per_address_across_usernames(
+    client: TestClient, world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(get_settings(), "login_max_failures_per_ip", 2)
+    for username in ("guess1", "guess2"):
+        assert client.post("/api/v1/auth/login", json={"username": username, "password": "x"}).status_code == 401
+    response = client.post("/api/v1/auth/login", json={"username": "t_gask", "password": PASSWORD})
+    assert response.status_code == 429
+
+
+def test_successful_login_clears_account_failures(
+    client: TestClient, world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(get_settings(), "login_max_failures_per_user", 2)
+    assert client.post("/api/v1/auth/login", json={"username": "t_admin", "password": "wrong"}).status_code == 401
+    assert client.post("/api/v1/auth/login", json={"username": "t_admin", "password": PASSWORD}).status_code == 200
+    assert client.post("/api/v1/auth/login", json={"username": "t_admin", "password": "wrong"}).status_code == 401
+    assert client.post("/api/v1/auth/login", json={"username": "t_admin", "password": PASSWORD}).status_code == 200
+
+
+def test_logout_revokes_all_tokens_of_the_user(client: TestClient, world: World) -> None:
+    first, second = (
+        client.post("/api/v1/auth/login", json={"username": "t_admin", "password": PASSWORD}).json()["access_token"]
+        for _ in range(2)
+    )
+    other = auth(world.users["gask"])
+    assert client.post("/api/v1/auth/logout", headers={"Authorization": f"Bearer {first}"}).status_code == 204
+    for token in (first, second):
+        response = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 401
+        assert response.json()["detail"]["code"] == "invalid_token"
+    assert client.get("/api/v1/auth/me", headers=other).status_code == 200
+    fresh = client.post("/api/v1/auth/login", json={"username": "t_admin", "password": PASSWORD}).json()
+    assert (
+        client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {fresh['access_token']}"}).status_code == 200
+    )
+
+
+def test_new_password_and_deactivation_revoke_tokens(client: TestClient, world: World) -> None:
+    admin = auth(world.users["admin"])
+    for target, change in (("mio_ust", {"password": "Another-passw0rd"}), ("gask", {"is_active": False})):
+        user = world.users[target]
+        headers = auth(user)
+        assert client.patch(f"/api/v1/users/{user.id}", json=change, headers=admin).status_code == 200
+        assert client.get("/api/v1/auth/me", headers=headers).status_code == 401
+    # A change of the name keeps the sessions.
+    law = world.users["law"]
+    headers = auth(law)
+    assert client.patch(f"/api/v1/users/{law.id}", json={"full_name": "Новое имя"}, headers=admin).status_code == 200
+    assert client.get("/api/v1/auth/me", headers=headers).status_code == 200
+
+
+def test_token_without_version_is_rejected(client: TestClient, world: World) -> None:
+    payload = {"sub": str(world.users["admin"].id), "exp": datetime.now(UTC) + timedelta(hours=1)}
+    token = jwt.encode(payload, get_settings().jwt_secret, algorithm=JWT_ALGORITHM)
+    assert client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"}).status_code == 401

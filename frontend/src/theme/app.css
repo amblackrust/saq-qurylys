@@ -93,14 +93,24 @@
   --font-sans: var(--font-sans);
   --font-heading: var(--font-heading);
   --font-mono: var(--font-mono);
-  --text-3xs: 13px;
+  --text-3xs: calc(13px * var(--font-scale));
   --text-3xs--line-height: 1.35;
-  --text-2xs: 13px;
+  --text-2xs: calc(13px * var(--font-scale));
   --text-2xs--line-height: 1.4;
-  --text-xs: 13px;
+  --text-xs: calc(13px * var(--font-scale));
   --text-xs--line-height: 1.4;
-  --text-sm: 14px;
+  --text-sm: calc(14px * var(--font-scale));
   --text-sm--line-height: 1.45;
+  --text-base: calc(16px * var(--font-scale));
+  --text-base--line-height: 1.5;
+  --text-lg: calc(18px * var(--font-scale));
+  --text-lg--line-height: 1.55;
+  --text-xl: calc(20px * var(--font-scale));
+  --text-xl--line-height: 1.4;
+  --text-2xl: calc(24px * var(--font-scale));
+  --text-2xl--line-height: 1.33;
+  --text-3xl: calc(30px * var(--font-scale));
+  --text-3xl--line-height: 1.2;
 
   --ease-out-soft: var(--ease);
 }

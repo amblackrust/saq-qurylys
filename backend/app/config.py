@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=("../.env", ".env"), extra="ignore")
 
     database_url: str
+    # The owner that runs the migrations. Empty: the migrations run as DATABASE_URL. When it names another role
+    # than DATABASE_URL, the migrations create that application role and grant it limited rights (app/db_role.py).
+    migration_database_url: str = ""
     redis_url: str = "redis://localhost:6379/0"
 
     # S3 / MinIO. S3_ENDPOINT is a URL such as http://minio:9000.
@@ -19,13 +22,19 @@ class Settings(BaseSettings):
     s3_access_key: str
     s3_secret_key: str
     s3_bucket_evidence: str = "evidence"
-    evidence_lock_mode: Literal["GOVERNANCE", "COMPLIANCE"] = "GOVERNANCE"
-    evidence_retention_days: int = Field(default=1, ge=1)
+    # COMPLIANCE: nobody, the MinIO root key included, can delete or shorten the lock before it ends. GOVERNANCE
+    # can be bypassed by a key with that right and is meant for development only (.env.example).
+    evidence_lock_mode: Literal["GOVERNANCE", "COMPLIANCE"] = "COMPLIANCE"
+    evidence_retention_days: int = Field(default=1825, ge=1)
     tsa_url: str = ""
 
     # No default on purpose: the service must not start with a guessable secret.
     jwt_secret: str = Field(min_length=32)
     jwt_ttl_minutes: int = Field(default=480, ge=1)
+    # Failed logins allowed per account and per client IP within the window, then the login waits for its end.
+    login_max_failures_per_user: int = Field(default=5, ge=1)
+    login_max_failures_per_ip: int = Field(default=20, ge=1)
+    login_lockout_minutes: int = Field(default=15, ge=1)
 
     llm_enabled: bool = False
     ollama_url: str = "http://host.docker.internal:11434"
@@ -123,6 +132,10 @@ class Settings(BaseSettings):
     @classmethod
     def _empty_api_id_is_unset(cls, value: object) -> object:
         return 0 if isinstance(value, str) and not value.strip() else value
+
+    @property
+    def migration_url(self) -> str:
+        return self.migration_database_url or self.database_url
 
     @property
     def userbot_configured(self) -> bool:

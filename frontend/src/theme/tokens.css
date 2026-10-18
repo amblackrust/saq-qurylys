@@ -52,6 +52,7 @@
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --font-heading: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --font-scale: 1;
 
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --dur: 180ms;
@@ -60,6 +61,10 @@
   --header-h: 68px;
   --page-max: 1680px;
   --gutter: 32px;
+}
+
+html[data-font='large'] {
+  --font-scale: 1.2;
 }
 
 :root.dark {

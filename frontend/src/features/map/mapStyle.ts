@@ -3,7 +3,7 @@ import type { Map as MapLibreMap, StyleSpecification } from '@/lib/maplibre';
 const CUSTOM_MAP_STYLE_URL = import.meta.env.VITE_MAP_STYLE_URL;
 
 export function mapStyleUrl(theme: 'light' | 'dark'): string {
-  return CUSTOM_MAP_STYLE_URL || `https://tiles.openfreemap.org/styles/${theme === 'dark' ? 'dark' : 'bright'}`;
+  return CUSTOM_MAP_STYLE_URL || `https://tiles.openfreemap.org/styles/${theme === 'dark' ? 'dark' : 'positron'}`;
 }
 
 /** MapLibre's controls and attribution need important overrides because its CSS is unlayered. */
@@ -46,15 +46,16 @@ export function recolorBasemap(map: MapLibreMap, theme: 'light' | 'dark'): void 
   const background = readToken('--bg');
   const border = readToken('--border-strong');
   const label = readToken('--text-3');
-  const set = (id: string, property: Parameters<MapLibreMap['setPaintProperty']>[1], value: string) => map.setPaintProperty(id, property, value);
+  const set = (id: string, property: Parameters<MapLibreMap['setPaintProperty']>[1], value: string) =>
+    map.setPaintProperty(id, property, value);
 
   for (const layer of map.getStyle().layers) {
     const { id } = layer;
     switch (layer.type) {
       case 'raster':
-        // Keep semantic marker colors intact while reducing raster glare only in dark mode.
+        // Tone the fallback raster to match the active app theme.
         map.setPaintProperty(id, 'raster-brightness-max', theme === 'dark' ? 0.55 : 1);
-        map.setPaintProperty(id, 'raster-saturation', theme === 'dark' ? -0.4 : 0);
+        map.setPaintProperty(id, 'raster-saturation', theme === 'dark' ? -0.4 : -0.5);
         map.setPaintProperty(id, 'raster-contrast', theme === 'dark' ? 0.1 : 0);
         break;
       case 'background':

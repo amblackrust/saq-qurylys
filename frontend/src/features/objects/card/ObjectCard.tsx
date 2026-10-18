@@ -5,6 +5,7 @@ import { Link } from 'react-router';
 import type { ObjectDetail } from '@/api/types';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { AssignmentsSection } from './AssignmentsSection';
 import { BreakdownList } from './BreakdownList';
 import { ComplaintsSection } from './ComplaintsSection';
 import { DocumentsSection } from './DocumentsSection';
@@ -25,7 +26,7 @@ function isObjectSection(value: string): value is ObjectSection {
 
 function sectionForHash(hash: string): ObjectSection | null {
   const id = hash.slice(1);
-  if (id === 'documents' || /^doc-\d+$/.test(id)) return 'review';
+  if (id === 'assignments' || id === 'documents' || /^doc-\d+$/.test(id)) return 'review';
   if (id === 'inspections' || /^inspection-\d+$/.test(id) || id === 'complaints' || /^complaint-\d+$/.test(id)) {
     return 'materials';
   }
@@ -110,6 +111,8 @@ export function ObjectCard({ object }: { object: ObjectDetail }) {
           </TabsList>
           <TabsContent value="review" className="mt-5 space-y-5">
             <DocumentsSection object={object} />
+            {/* Keep hash targets above async content so assignment loading cannot shift the scroll position. */}
+            <AssignmentsSection object={object} />
           </TabsContent>
           <TabsContent value="details" className="mt-5 space-y-5">
             <PassportSection object={object} />

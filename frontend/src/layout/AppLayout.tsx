@@ -12,20 +12,25 @@ import {
   IconSettings,
   IconSparkles,
   IconSpeakerphone,
+  IconTextSize,
+  IconUserCheck,
   IconX,
 } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import { useAssistantEnabled } from '@/api/hooks/assistant';
 import { useVisionEnabled } from '@/api/hooks/vision';
 import { useAuth } from '@/auth/useAuth';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { LoadingBlock } from '@/components/QueryState';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { AssistantPanel } from '@/features/assistant/AssistantPanel';
 import { usePanelState } from '@/features/assistant/usePanelState';
+import { useLargeFont } from '@/lib/preferences';
 import { cn } from '@/lib/utils';
 import { ActivityIsland } from './ActivityIsland';
 import { AppearanceMenu } from './AppearanceMenu';
+import { GlobalSearch } from './GlobalSearch';
 import { LanguageSwitch } from './LanguageSwitch';
 import { NotificationsBell } from './NotificationsBell';
 import { UserMenu } from './UserMenu';
@@ -73,8 +78,25 @@ export function AppLayout() {
   const assistantEnabled = useAssistantEnabled();
   const assistant = usePanelState();
   const askAiRef = useRef<HTMLButtonElement>(null);
+  const headerRef = useRef<HTMLElement>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [largeFont, setLargeFont] = useLargeFont();
   const assistantOpen = assistantEnabled && assistant.open;
+
+  useEffect(() => {
+    const header = headerRef.current;
+    if (!header) return;
+    const updateHeaderHeight = () => {
+      document.documentElement.style.setProperty('--header-h', `${header.offsetHeight}px`);
+    };
+    const observer = new ResizeObserver(updateHeaderHeight);
+    observer.observe(header);
+    updateHeaderHeight();
+    return () => {
+      observer.disconnect();
+      document.documentElement.style.removeProperty('--header-h');
+    };
+  }, []);
 
   useEffect(() => {
     const desktopQuery = window.matchMedia('(min-width: 64rem)');
@@ -96,6 +118,7 @@ export function AppLayout() {
     { to: '/graph', label: t('nav.graph'), icon: <IconChartDots3 /> },
   ] : [];
   const toolsItems: RouteItem[] = [
+    ...(canEditRegistry ? [{ to: '/control', label: t('nav.control'), icon: <IconUserCheck /> }] : []),
     ...(canEditRegistry ? [{ to: '/sources', label: t('nav.sources'), icon: <IconRss /> }] : []),
     ...(canSeeRegistry && visionEnabled ? [{ to: '/vision', label: t('nav.vision'), icon: <IconEye /> }] : []),
     ...(isAdmin ? [{ to: '/admin', label: t('nav.admin'), icon: <IconSettings /> }] : []),
@@ -139,13 +162,13 @@ export function AppLayout() {
       className="min-h-dvh"
       style={{ '--assistant-w': assistant.expanded ? 'min(640px, 60vw)' : 'min(400px, 40vw)' } as CSSProperties}
     >
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-(--sidebar-w) flex-col border-r border-border bg-surface-glass backdrop-blur-xl lg:flex">
+      <aside data-print="hide" className="fixed inset-y-0 left-0 z-30 hidden w-(--sidebar-w) flex-col border-r border-border bg-surface-glass backdrop-blur-xl lg:flex">
         {sidebar()}
       </aside>
 
-      <div className="min-h-dvh lg:ml-(--sidebar-w)">
-        <header className="sticky top-0 z-40 border-b border-border bg-surface-glass backdrop-blur-xl">
-          <div className="flex h-(--header-h) items-center gap-3 px-(--gutter)">
+      <div data-print="layout" className="min-h-dvh lg:ml-(--sidebar-w)">
+        <header ref={headerRef} data-print="hide" className="sticky top-0 z-40 border-b border-border bg-surface-glass backdrop-blur-xl">
+          <div className="mx-auto flex min-h-16 max-w-(--page-max) flex-wrap items-center gap-3 px-(--gutter) max-lg:min-h-12 max-lg:gap-2">
             <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
               <SheetTrigger asChild>
                 <Button
@@ -175,6 +198,7 @@ export function AppLayout() {
             <div className="min-w-0 flex-1 lg:flex-none">
               <h1 data-page-title tabIndex={-1} className="truncate text-lg font-semibold tracking-tight text-text">{pageTitle}</h1>
             </div>
+            <GlobalSearch />
             <div role="group" aria-label={t('header.utilities')} className="ml-auto flex items-center gap-1">
               {assistantEnabled && (
                 <Button
@@ -190,26 +214,41 @@ export function AppLayout() {
                   <IconSparkles />
                 </Button>
               )}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-11"
+                aria-label={t('header.largeFont')}
+                title={t('header.largeFont')}
+                aria-pressed={largeFont}
+                onClick={() => setLargeFont(!largeFont)}
+              >
+                <IconTextSize />
+              </Button>
               <NotificationsBell />
-              <div className="lg:hidden"><UserMenu /></div>
+              <div className="hidden min-[30em]:block lg:hidden"><UserMenu /></div>
             </div>
           </div>
           {canSeeRegistry && (
-            <div className="pointer-events-none absolute inset-x-0 bottom-0">
+            <div data-print="hide" className="pointer-events-none absolute inset-x-0 bottom-0">
               <div className="relative h-0 px-(--gutter)"><ActivityIsland /></div>
             </div>
           )}
         </header>
-        <div className={cn(assistantOpen && 'min-[62em]:pr-(--assistant-w)')}>
+        <div data-print="main-shell" className={cn(assistantOpen && 'min-[62em]:pr-(--assistant-w)')}>
           <main className="mx-auto min-h-[calc(100dvh-var(--header-h))] max-w-(--page-max) px-(--gutter) pt-8 pb-14 max-sm:pt-6">
-            <Suspense fallback={<LoadingBlock />}>
-              <div className="animate-in duration-200 fade-in-0 slide-in-from-bottom-1"><Outlet /></div>
-            </Suspense>
+            <ErrorBoundary resetKey={location.pathname}>
+              <Suspense fallback={<LoadingBlock />}>
+                <div className="animate-in duration-200 fade-in-0 slide-in-from-bottom-1"><Outlet /></div>
+              </Suspense>
+            </ErrorBoundary>
           </main>
         </div>
       </div>
       {assistantEnabled && (
-        <AssistantPanel open={assistantOpen} expanded={assistant.expanded} onToggleExpanded={assistant.toggleExpanded} onClose={closeAssistant} />
+        <div data-print="hide">
+          <AssistantPanel open={assistantOpen} expanded={assistant.expanded} onToggleExpanded={assistant.toggleExpanded} onClose={closeAssistant} />
+        </div>
       )}
     </div>
   );

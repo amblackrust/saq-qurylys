@@ -88,7 +88,8 @@ export type NotificationKind =
   | 'signal_responded'
   | 'capture_failed'
   | 'citizen_report'
-  | 'collector_failed';
+  | 'collector_failed'
+  | 'assignment_new';
 
 export type HolidayKind = 'holiday' | 'workday';
 export type TerritoryLevel = 'region' | 'city';
@@ -1189,4 +1190,83 @@ export interface VisionFindingInput {
   category: FindingCategory;
   status: FindingStatus;
   note?: string | null;
+}
+
+// ---------------------------------------------------------------- global search
+
+export interface SearchObjectHit {
+  id: number;
+  name: string;
+  code: string;
+  address: string | null;
+  zone: Zone | null;
+  developer_name: string | null;
+  match: string;
+}
+
+export interface SearchDeveloperHit {
+  id: number;
+  name: string;
+  bin: string;
+  /** First object of the developer inside the user's territory; null when there is none (nothing to open). */
+  object_id: number | null;
+}
+
+export interface SearchSignalHit {
+  id: number;
+  number: string;
+  object_name: string;
+  status: SignalStatus;
+}
+
+export interface SearchResults {
+  objects: SearchObjectHit[];
+  developers: SearchDeveloperHit[];
+  signals: SearchSignalHit[];
+}
+
+// ---------------------------------------------------------------- assignments
+
+export type AssignmentStatus = 'open' | 'done' | 'cancelled';
+
+export interface Assignment {
+  id: number;
+  object: { id: number; name: string; code: string | null; zone: Zone | null };
+  author_id: number;
+  author_name: string;
+  assignee_id: number;
+  assignee_name: string;
+  task: string;
+  due_date: string;
+  status: AssignmentStatus;
+  is_overdue: boolean;
+  days_overdue: number;
+  result: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface Assignee {
+  id: number;
+  full_name: string;
+  role: Role;
+}
+
+export interface AssignmentListParams {
+  mine?: boolean;
+  status?: AssignmentStatus;
+  overdue?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+export interface AssignmentCreate {
+  assignee_id: number;
+  task: string;
+  due_date: string;
+}
+
+export interface AssignmentPatch {
+  status?: 'done' | 'cancelled';
+  result?: string;
 }

@@ -12,6 +12,7 @@ from pathlib import Path
 # Environment must be set before `app` is imported: settings are read once and cached.
 os.environ.setdefault("TEST_DATABASE_URL", "postgresql+psycopg://saq:saq_dev_password@localhost:5433/saq_test")
 os.environ["DATABASE_URL"] = os.environ["TEST_DATABASE_URL"]
+os.environ["MIGRATION_DATABASE_URL"] = ""
 os.environ.setdefault("S3_ENDPOINT", "http://localhost:9000")
 os.environ.setdefault("S3_ACCESS_KEY", "saq-minio-dev")
 os.environ.setdefault("S3_SECRET_KEY", "saq-minio-dev-secret")
@@ -25,6 +26,8 @@ os.environ["EVIDENCE_RETENTION_DAYS"] = "1"
 os.environ["TSA_URL"] = ""
 os.environ["JWT_SECRET"] = "test-secret-test-secret-test-secret-0123456789"
 os.environ["EVENTS_ENABLED"] = "false"
+# The development Redis (database 0) serves the running stack; tests use database 15 (tests/support_collect.py).
+os.environ["REDIS_URL"] = "redis://localhost:6379/15"
 os.environ["LLM_ENABLED"] = "false"
 # The developer's .env may switch real collectors on; tests register their own and never reach the network.
 os.environ["HOMEPORTAL_SYNC_ENABLED"] = "false"
@@ -44,6 +47,7 @@ from fastapi.testclient import TestClient
 from minio.deleteobjects import DeleteObject
 from pwdlib import PasswordHash
 from pwdlib.hashers.argon2 import Argon2Hasher
+from redis import Redis
 from sqlalchemy import Engine, create_engine, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
@@ -54,7 +58,9 @@ from app.db import get_engine, get_session
 from app.main import app
 from app.models import AppUser, ConstructionObject, District, Territory
 from app.models.enums import Role, TerritoryLevel
+from app.modules.auth import throttle
 from app.security import create_access_token, hash_password
+from tests.support_collect import TEST_REDIS_URL
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 PASSWORD = "Passw0rd-for-tests"
@@ -64,6 +70,16 @@ PASSWORD = "Passw0rd-for-tests"
 def fast_password_hashing() -> None:
     """Argon2 with minimal cost: tests create many users."""
     security._password_hash = PasswordHash((Argon2Hasher(time_cost=1, memory_cost=1024, parallelism=1),))
+
+
+@pytest.fixture(autouse=True)
+def login_counters() -> Iterator[None]:
+    """Failed-login counters (in the test Redis database, REDIS_URL above) do not carry over between tests."""
+    yield
+    with Redis.from_url(TEST_REDIS_URL) as client:
+        keys = list(client.scan_iter(f"{throttle.KEY_PREFIX}*"))
+        if keys:
+            client.delete(*keys)
 
 
 @pytest.fixture(scope="session")
@@ -173,7 +189,7 @@ def world(db: Session) -> World:
 
 
 def auth(user: AppUser) -> dict[str, str]:
-    return {"Authorization": f"Bearer {create_access_token(user.id)}"}
+    return {"Authorization": f"Bearer {create_access_token(user.id, user.token_version)}"}
 
 
 def make_object(db: Session, territory: Territory, name: str = "ЖК Тест", **fields: object) -> ConstructionObject:

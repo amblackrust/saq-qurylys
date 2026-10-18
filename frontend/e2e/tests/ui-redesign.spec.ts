@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { expect, test } from '../support/test';
 import type { Page, Route } from '@playwright/test';
-import type { ActivityEvent, AdDetail, EvidenceMeta, LinkGraph, ObjectDetail, ObjectDocument, Role, SignalDetail, SignalRecipient, SignalStatus, User, VisionAsset, VisionFinding, VisionFrame, VisionSessionDetail } from '../../src/api/types';
+import type { ActivityEvent, AdDetail, Assignment, Assignee, EvidenceMeta, LinkGraph, ObjectDetail, ObjectDocument, Role, SearchResults, SignalDetail, SignalRecipient, SignalStatus, User, VisionAsset, VisionFinding, VisionFrame, VisionSessionDetail } from '../../src/api/types';
 
 const screenshotDir = '/tmp/saq-macos-ui';
 const objectRow = {
@@ -26,6 +26,14 @@ const dashboard = {
     { ...objectRow, id: 9, code: 'D-09', name: 'ЖК Радужный парк', score: 72, zone: 'red' as const },
     { ...objectRow, id: 7, code: 'D-07', name: 'ЖК Северный бриз', score: 42, zone: 'yellow' as const },
   ],
+};
+const searchFixture: SearchResults = {
+  objects: [{ id: 7, name: objectRow.name, code: objectRow.code, address: 'ул. Примерная, 1', zone: 'yellow', developer_name: 'ТОО Северстрой', match: 'name' }],
+  developers: [
+    { id: 3, name: 'ТОО Северстрой', bin: '000000000001', object_id: 7 },
+    { id: 4, name: 'ТОО Без объектов', bin: '000000000002', object_id: null },
+  ],
+  signals: [{ id: 42, number: 'SIG-2026-0042', object_name: objectRow.name, status: 'requires_confirmation' }],
 };
 const settingsFixture = {
   review_days: 10,
@@ -69,6 +77,26 @@ function makeUser(role: Role): User {
     role,
     territory_id: 1,
     locale: 'ru',
+  };
+}
+
+function makeAssignment(overrides: Partial<Assignment> = {}): Assignment {
+  return {
+    id: 61,
+    object: { id: 7, name: objectRow.name, code: objectRow.code, zone: 'yellow' },
+    author_id: 2,
+    author_name: 'Сотрудник ГАСК',
+    assignee_id: 1,
+    assignee_name: 'Сотрудник МИО',
+    task: 'Проверить сведения по объекту',
+    due_date: '2026-10-20',
+    status: 'open',
+    is_overdue: false,
+    days_overdue: 0,
+    result: null,
+    completed_at: null,
+    created_at: '2026-10-15T10:00:00Z',
+    ...overrides,
   };
 }
 
@@ -324,6 +352,9 @@ interface MockState {
   role: Role;
   graph?: LinkGraph;
   signals: SignalDetail[];
+  assignments: Assignment[];
+  searchResults?: SearchResults;
+  assignees?: Assignee[];
   activityEvents?: ActivityEvent[];
   evidenceContents?: Record<number, { contentType: string; body: string | Buffer }>;
   evidenceFailures?: Record<number, number>;
@@ -357,6 +388,10 @@ interface Harness {
   mutations: CapturedMutation[];
   unexpected: string[];
   listRequests: URL[];
+  assignmentRequests: URL[];
+  searchQueries: string[];
+  downloadRequests: Array<{ url: URL; authorization: string | null }>;
+  logoutAuthorization: string | null;
   evidenceRequests: Array<{ id: number; authorization: string | null }>;
   expectedCancelledEvidenceIds: Set<number>;
   pageErrors: string[];
@@ -373,6 +408,7 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
     role,
     sourceWatched: true,
     signals: [],
+    assignments: [],
     expectedEvidence503Responses: 0,
     signal: makeSignal(),
     ad: structuredClone(adFixture),
@@ -385,6 +421,10 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
     mutations: [],
     unexpected: [],
     listRequests: [],
+    assignmentRequests: [],
+    searchQueries: [],
+    downloadRequests: [],
+    logoutAuthorization: null,
     evidenceRequests: [],
     expectedCancelledEvidenceIds: new Set(),
     pageErrors: [],
@@ -404,8 +444,11 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
   });
 
   await page.addInitScript(() => {
-    localStorage.setItem('saq_token', 'mock-ui-session');
-    localStorage.setItem('saq_lang', 'ru');
+    if (localStorage.getItem('__ui_mock_session_initialized') !== 'true') {
+      localStorage.setItem('saq_token', 'mock-ui-session');
+      localStorage.setItem('saq_lang', 'ru');
+      localStorage.setItem('__ui_mock_session_initialized', 'true');
+    }
   });
 
   await page.route('**/api/v1/**', async (route) => {
@@ -413,10 +456,14 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
     const url = new URL(request.url());
     const path = url.pathname.replace(/^\/api\/v1/, '');
     const method = request.method();
-    const body = method === 'GET' || method === 'HEAD' ? null : request.postDataJSON();
+    const body = method === 'GET' || method === 'HEAD' || request.postData() === null ? null : request.postDataJSON();
     if (method !== 'GET') harness.mutations.push({ method, path, body });
 
     if (method === 'GET' && path === '/auth/me') return json(route, makeUser(state.role));
+    if (method === 'POST' && path === '/auth/logout') {
+      harness.logoutAuthorization = request.headers()['authorization'] ?? null;
+      return route.fulfill({ status: 204 });
+    }
     if (method === 'GET' && path === '/notifications') return json(route, { items: [] });
     if (method === 'GET' && path === '/activity') {
       return json(route, { items: state.activityEvents ?? [], cursor: 'mock-cursor', reset: false });
@@ -446,7 +493,15 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
     }
     if (method === 'GET' && path === '/territories') return json(route, []);
     if (method === 'GET' && path === '/dashboard') return json(route, dashboard);
+    if (method === 'GET' && path === '/dashboard/report.pdf') {
+      harness.downloadRequests.push({ url, authorization: request.headers()['authorization'] ?? null });
+      return route.fulfill({ status: 200, contentType: 'application/pdf', body: Buffer.from('%PDF-1.4\n% report fixture\n', 'utf8') });
+    }
     if (method === 'GET' && path === '/graph') return json(route, state.graph ?? graphFixture);
+    if (method === 'GET' && path === '/search') {
+      harness.searchQueries.push(url.searchParams.get('q') ?? '');
+      return json(route, state.searchResults ?? searchFixture);
+    }
     if (method === 'GET' && path === '/source-suggestions') return json(route, []);
     if (method === 'GET' && path === '/signals') {
       harness.listRequests.push(url);
@@ -466,6 +521,63 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
     }
     if (method === 'GET' && path === '/signals/42') return json(route, state.signal);
     if (method === 'GET' && path === '/signals/88') return json(route, state.signal);
+    if (method === 'GET' && /^\/objects\/\d+\/dossier\.pdf$/.test(path)) {
+      harness.downloadRequests.push({ url, authorization: request.headers()['authorization'] ?? null });
+      return route.fulfill({ status: 200, contentType: 'application/pdf', body: Buffer.from('%PDF-1.4\n% dossier fixture\n', 'utf8') });
+    }
+    if (method === 'GET' && path === '/assignments') {
+      harness.assignmentRequests.push(url);
+      const mine = url.searchParams.get('mine') === 'true';
+      const status = url.searchParams.get('status');
+      const overdue = url.searchParams.get('overdue') === 'true';
+      const rows = state.assignments.filter((assignment) =>
+        (!mine || assignment.assignee_id === makeUser(state.role).id) &&
+        (status === null || assignment.status === status) &&
+        (!overdue || assignment.is_overdue),
+      );
+      const offset = Number(url.searchParams.get('offset') ?? 0);
+      const limit = Number(url.searchParams.get('limit') ?? rows.length);
+      return json(route, { items: rows.slice(offset, offset + limit), total: rows.length });
+    }
+    if (method === 'GET' && path === '/assignments/assignees') {
+      return json(route, state.assignees ?? [
+        { id: 1, full_name: 'Сотрудник МИО', role: 'mio_officer' },
+        { id: 2, full_name: 'Сотрудник ГАСК', role: 'gask' },
+      ]);
+    }
+    if (method === 'GET' && /^\/objects\/\d+\/assignments$/.test(path)) {
+      const objectId = Number(path.split('/')[2]);
+      return json(route, state.assignments.filter((assignment) => assignment.object.id === objectId));
+    }
+    if (method === 'POST' && /^\/objects\/\d+\/assignments$/.test(path)) {
+      const objectId = Number(path.split('/')[2]);
+      const user = makeUser(state.role);
+      const input = body as { assignee_id: number; task: string; due_date: string };
+      const assignee = (state.assignees ?? [
+        { id: 1, full_name: 'Сотрудник МИО', role: 'mio_officer' as const },
+        { id: 2, full_name: 'Сотрудник ГАСК', role: 'gask' as const },
+      ]).find((item) => item.id === input.assignee_id);
+      const created = makeAssignment({
+        id: 62,
+        object: { id: objectId, name: objectRow.name, code: objectRow.code, zone: 'yellow' },
+        author_id: user.id,
+        author_name: user.full_name,
+        assignee_id: input.assignee_id,
+        assignee_name: assignee?.full_name ?? 'Сотрудник',
+        task: input.task,
+        due_date: input.due_date,
+      });
+      state.assignments.unshift(created);
+      return json(route, created, 201);
+    }
+    if (method === 'PATCH' && /^\/assignments\/\d+$/.test(path)) {
+      const assignmentId = Number(path.split('/')[2]);
+      const assignment = state.assignments.find((item) => item.id === assignmentId);
+      if (!assignment) return json(route, { detail: 'Assignment fixture not found' }, 404);
+      Object.assign(assignment, body as Partial<Assignment>);
+      if (assignment.status === 'done') assignment.completed_at = '2026-10-16T12:00:00Z';
+      return json(route, assignment);
+    }
     if (method === 'GET' && /^\/objects\/\d+$/.test(path)) {
       return json(route, { ...state.object, id: Number(path.split('/').at(-1)) });
     }
@@ -611,8 +723,7 @@ test('work opens as the operator task queue, links the real next item and suppor
   await expect(page).toHaveURL(/\/work$/);
   await expect(page.getByRole('main').getByRole('heading', { level: 1, name: 'Задачи' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Доработать карточку SIG-2026-0043' })).toHaveAttribute('href', '/signals/43');
-  await expect(page.getByRole('heading', { name: 'Что требует внимания' })).toBeVisible();
-  await screenshot(page, 'work-light-1440');
+  await screenshot(page, 'work-mio-ru');
 
   await page.getByText('ҚАЗ', { exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'kk');
@@ -1745,4 +1856,286 @@ test.describe('Ask AI panel', () => {
     await expect(opener).toBeFocused();
     expectCleanBrowser(harness);
   });
+});
+
+test('global search opens object and signal results on desktop and stays inside a narrow phone viewport', async ({ page }) => {
+  const harness = await installMocks(page, 'mio_officer');
+  await page.goto('/work');
+  const search = page.getByRole('combobox', { name: 'Глобальный поиск' });
+  await page.keyboard.press('/');
+  await expect(search).toBeFocused();
+  await search.fill('42');
+
+  const listbox = page.getByRole('listbox', { name: 'Глобальный поиск' });
+  await expect(page.getByRole('group', { name: 'Объекты' })).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Застройщики' })).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Сигнальные карточки' })).toBeVisible();
+  const unlinkedDeveloper = page.getByRole('option', { name: /ТОО Без объектов/ });
+  await expect(unlinkedDeveloper).toHaveAttribute('aria-disabled', 'true');
+  const signal = page.getByRole('option', { name: /SIG-2026-0042/ });
+  await screenshot(page, 'global-search-desktop-light');
+  await page.getByRole('button', { name: /Оформление/ }).click();
+  await page.getByRole('menuitemradio', { name: 'Тёмная' }).click();
+  await search.focus();
+  await expect(listbox).toBeVisible();
+  await screenshot(page, 'global-search-desktop-dark');
+  await search.press('ArrowDown');
+  await search.press('ArrowDown');
+  await expect(signal).toHaveAttribute('aria-selected', 'true');
+  await search.press('Enter');
+  await expect(page).toHaveURL(/\/signals\/42$/);
+
+  await page.getByRole('button', { name: /Оформление/ }).click();
+  await page.getByRole('menuitemradio', { name: 'Светлая' }).click();
+  await page.setViewportSize({ width: 320, height: 844 });
+  await page.goto('/work');
+  const mobileSearch = page.getByRole('combobox', { name: 'Глобальный поиск' });
+  await mobileSearch.fill('ЖК');
+  await expect(page.getByRole('group', { name: 'Объекты' })).toBeVisible();
+  const mobileInputGroupBox = await mobileSearch.locator('xpath=..').boundingBox();
+  const mobileSearchRowBox = await mobileSearch.locator('xpath=../..').boundingBox();
+  const mobileListBox = await listbox.boundingBox();
+  const mobileUtilityBox = await page.getByRole('group', { name: 'Действия и настройки' }).boundingBox();
+  const mobileDocumentWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+  expect(mobileInputGroupBox).not.toBeNull();
+  expect(mobileSearchRowBox).not.toBeNull();
+  expect(mobileInputGroupBox!.x).toBe(mobileSearchRowBox!.x);
+  expect(mobileInputGroupBox!.width).toBe(mobileSearchRowBox!.width);
+  expect(mobileInputGroupBox!.width).toBeGreaterThan(250);
+  expect(mobileUtilityBox).not.toBeNull();
+  expect(mobileInputGroupBox!.y).toBeGreaterThanOrEqual(mobileUtilityBox!.y + mobileUtilityBox!.height);
+  expect(mobileDocumentWidth).toBeLessThanOrEqual(320);
+  expect(mobileListBox).not.toBeNull();
+  expect(mobileListBox!.x).toBeGreaterThanOrEqual(0);
+  expect(mobileListBox!.x + mobileListBox!.width).toBeLessThanOrEqual(320);
+  await screenshot(page, 'global-search-mobile-320-light');
+  await page.getByRole('group', { name: 'Объекты' }).getByRole('option', { name: /ЖК Северный бриз/ }).click();
+  await expect(page).toHaveURL(/\/objects\/7$/);
+  expect(harness.searchQueries).toContain('42');
+  expect(harness.searchQueries).toContain('ЖК');
+  expectCleanBrowser(harness);
+});
+
+test('registry staff can filter assignments and task authors and assignees get the right actions', async ({ page }) => {
+  const assigneeTask = makeAssignment({
+    author_id: 2,
+    author_name: 'Сотрудник ГАСК',
+    assignee_id: 1,
+    assignee_name: 'Сотрудник МИО',
+    task: 'Проверить сведения по объекту',
+    due_date: '2026-10-01',
+    is_overdue: true,
+    days_overdue: 15,
+  });
+  const authorTask = makeAssignment({
+    id: 62,
+    author_id: 1,
+    author_name: 'Сотрудник МИО',
+    assignee_id: 2,
+    assignee_name: 'Сотрудник ГАСК',
+    task: 'Проверить документы по объекту',
+    due_date: '2026-10-25',
+  });
+  const harness = await installMocks(page, 'mio_officer', { assignments: [assigneeTask, authorTask] });
+
+  await page.goto('/work');
+  await expect(page.getByRole('heading', { level: 2, name: 'Мои поручения' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Все поручения на контроле' })).toHaveAttribute('href', '/control');
+  await screenshot(page, 'work-assignments-light');
+  await page.getByRole('button', { name: /Оформление/ }).click();
+  await page.getByRole('menuitemradio', { name: 'Тёмная' }).click();
+  await screenshot(page, 'work-assignments-dark');
+  const mine = page.getByRole('listitem').filter({ hasText: assigneeTask.task });
+  await expect(mine.getByRole('button', { name: 'Отметить выполненным' })).toBeVisible();
+  await expect(mine.getByRole('button', { name: 'Отменить поручение' })).toHaveCount(0);
+
+  await page.goto('/control?filter=overdue');
+  await expect(page.getByRole('heading', { level: 1, name: 'На контроле' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Просроченные' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('row').filter({ hasText: assigneeTask.task })).toBeVisible();
+  await expect(page.getByRole('row').filter({ hasText: authorTask.task })).toHaveCount(0);
+  expect(harness.assignmentRequests.some((url) => url.searchParams.get('overdue') === 'true')).toBe(true);
+  await screenshot(page, 'control-assignments-dark');
+  await page.getByRole('button', { name: /Оформление/ }).click();
+  await page.getByRole('menuitemradio', { name: 'Светлая' }).click();
+  await screenshot(page, 'control-assignments-light');
+
+  await page.goto('/objects/7#assignments');
+  await expect(page.getByRole('heading', { name: 'Поручения' })).toBeVisible();
+  await screenshot(page, 'object-assignments-light');
+  await page.getByRole('button', { name: /Оформление/ }).click();
+  await page.getByRole('menuitemradio', { name: 'Тёмная' }).click();
+  await screenshot(page, 'object-assignments-dark');
+  const assigneeItem = page.getByRole('listitem').filter({ hasText: assigneeTask.task });
+  const authorItem = page.getByRole('listitem').filter({ hasText: authorTask.task });
+  await expect(assigneeItem.getByRole('button', { name: 'Отметить выполненным' })).toBeVisible();
+  await expect(assigneeItem.getByRole('button', { name: 'Отменить поручение' })).toHaveCount(0);
+  await expect(authorItem.getByRole('button', { name: 'Отметить выполненным' })).toBeVisible();
+  await authorItem.getByRole('button', { name: 'Отменить поручение' }).click();
+  await expect(authorItem).toContainText('Отменить это поручение?');
+  await authorItem.getByRole('button', { name: 'Да, отменить' }).click();
+  await expect.poll(() => harness.mutations.filter((item) => item.path === '/assignments/62')).toHaveLength(1);
+  expect(harness.mutations.find((item) => item.path === '/assignments/62')?.body).toEqual({ status: 'cancelled' });
+
+  await assigneeItem.getByRole('button', { name: 'Отметить выполненным' }).click();
+  const completeDialog = page.getByRole('dialog', { name: 'Отметить поручение выполненным' });
+  await completeDialog.getByRole('textbox', { name: 'Что сделано и что выяснилось' }).fill('Сведения проверены.');
+  await completeDialog.getByRole('button', { name: 'Отметить выполненным' }).click();
+  await expect.poll(() => harness.mutations.filter((item) => item.path === '/assignments/61')).toHaveLength(1);
+  expect(harness.mutations.find((item) => item.path === '/assignments/61')?.body).toEqual({ status: 'done', result: 'Сведения проверены.' });
+  expectCleanBrowser(harness);
+});
+
+test('recipients are redirected away from registry assignment control', async ({ page }) => {
+  const harness = await installMocks(page, 'gask');
+  await page.goto('/control');
+  await expect(page).toHaveURL(/\/signals$/);
+  await expect(page.getByRole('link', { name: 'На контроле' })).toHaveCount(0);
+  expect(harness.unexpected).toEqual([]);
+  expect(harness.pageErrors).toEqual([]);
+});
+
+test('work reports and object dossiers download authenticated PDF files', async ({ page }) => {
+  const harness = await installMocks(page, 'mio_officer');
+  await page.goto('/work');
+  const reportDownloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Сформировать доклад (PDF)' }).click();
+  const reportDownload = await reportDownloadPromise;
+  expect(reportDownload.suggestedFilename()).toMatch(/^doklad-\d{4}-\d{2}-\d{2}-\d{4}-\d{2}-\d{2}\.pdf$/);
+  await screenshot(page, 'work-report-light');
+  await page.getByRole('button', { name: /Оформление/ }).click();
+  await page.getByRole('menuitemradio', { name: 'Тёмная' }).click();
+  await screenshot(page, 'work-report-dark');
+  const reportRequest = harness.downloadRequests.find(({ url }) => url.pathname === '/api/v1/dashboard/report.pdf');
+  expect(reportRequest?.authorization).toBe('Bearer mock-ui-session');
+  expect(reportRequest?.url.searchParams.get('from')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  expect(reportRequest?.url.searchParams.get('to')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  expect(reportRequest!.url.searchParams.get('from')! <= reportRequest!.url.searchParams.get('to')!).toBe(true);
+
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: /Оформление/ }).click();
+  await page.getByRole('menuitemradio', { name: 'Светлая' }).click();
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 320, height: 844 });
+  await page.goto('/work');
+  const reportPanel = page.locator('section[aria-labelledby="work-report-title"]');
+  const mobileReportButton = reportPanel.getByRole('button', { name: /PDF/ });
+  await expect(reportPanel).toBeVisible();
+  await expect(mobileReportButton).toBeVisible();
+  await screenshot(page, 'work-report-mobile-320-light');
+
+  const mobileMenu = page.getByRole('button', { name: /Разделы|Бөлімдер/ });
+  const largeFontButton = page.getByRole('button', { name: /Крупный шрифт|Ірі қаріп/ });
+  await largeFontButton.click();
+  await expect(largeFontButton).toHaveAttribute('aria-pressed', 'true');
+  for (const language of ['RU', 'ҚАЗ']) {
+    await mobileMenu.click();
+    await page.getByRole('radio', { name: language }).click();
+    await page.keyboard.press('Escape');
+    await expect(mobileReportButton).toBeVisible();
+    const panelBox = await reportPanel.boundingBox();
+    const buttonBox = await mobileReportButton.boundingBox();
+    const labelBox = await mobileReportButton.locator('span').boundingBox();
+    expect(panelBox).not.toBeNull();
+    expect(buttonBox).not.toBeNull();
+    expect(labelBox).not.toBeNull();
+    expect(buttonBox!.x).toBeGreaterThanOrEqual(panelBox!.x);
+    expect(buttonBox!.x + buttonBox!.width).toBeLessThanOrEqual(panelBox!.x + panelBox!.width);
+    expect(labelBox!.x).toBeGreaterThanOrEqual(buttonBox!.x);
+    expect(labelBox!.x + labelBox!.width).toBeLessThanOrEqual(buttonBox!.x + buttonBox!.width);
+    expect(labelBox!.y).toBeGreaterThanOrEqual(buttonBox!.y);
+    expect(labelBox!.y + labelBox!.height).toBeLessThanOrEqual(buttonBox!.y + buttonBox!.height);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+    await screenshot(page, `work-report-mobile-320-large-${language === 'RU' ? 'ru' : 'kk'}`);
+  }
+  await mobileMenu.click();
+  await page.getByRole('radio', { name: 'RU' }).click();
+  await page.keyboard.press('Escape');
+  await largeFontButton.click();
+  await expect(largeFontButton).toHaveAttribute('aria-pressed', 'false');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole('button', { name: /Оформление/ }).click();
+  await page.getByRole('menuitemradio', { name: 'Тёмная' }).click();
+  await page.keyboard.press('Escape');
+
+  await page.goto('/objects/7');
+  const dossierDownloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Сформировать дело' }).click();
+  const dossierDownload = await dossierDownloadPromise;
+  expect(dossierDownload.suggestedFilename()).toBe('D-07-dossier.pdf');
+  const dossierRequest = harness.downloadRequests.find(({ url }) => url.pathname === '/api/v1/objects/7/dossier.pdf');
+  expect(dossierRequest?.authorization).toBe('Bearer mock-ui-session');
+  await screenshot(page, 'object-dossier-dark');
+  await page.getByRole('button', { name: /Оформление/ }).click();
+  await page.getByRole('menuitemradio', { name: 'Светлая' }).click();
+  await screenshot(page, 'object-dossier-light');
+  await page.getByRole('button', { name: /Оформление/ }).click();
+  await page.getByRole('menuitemradio', { name: 'Тёмная' }).click();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menuitemradio', { name: 'Тёмная' })).toBeHidden();
+  await page.emulateMedia({ media: 'print' });
+  await expect.poll(() => page.evaluate(() =>
+    window.matchMedia('print').matches &&
+    getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() === '#fff' &&
+    getComputedStyle(document.body).backgroundColor === 'rgb(255, 255, 255)',
+  )).toBe(true);
+  const printState = await page.evaluate(() => {
+    const hiddenControls = Array.from(document.querySelectorAll<HTMLElement>('[data-print="hide"]'));
+    const sidebar = document.querySelector<HTMLElement>('aside[data-print="hide"]');
+    const layout = document.querySelector<HTMLElement>('[data-print="layout"]');
+    const mainShell = document.querySelector<HTMLElement>('[data-print="main-shell"]');
+    const main = document.querySelector<HTMLElement>('main');
+    return {
+      theme: document.documentElement.dataset.theme,
+      pathname: window.location.pathname,
+      printMediaMatches: window.matchMedia('print').matches,
+      hiddenControlsAreHidden: hiddenControls.every((element) => getComputedStyle(element).display === 'none'),
+      sidebarIsHidden: sidebar !== null && getComputedStyle(sidebar).display === 'none',
+      bodyBackground: getComputedStyle(document.body).backgroundColor,
+      bodyColor: getComputedStyle(document.body).color,
+      rootBgToken: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(),
+      bodyBgToken: getComputedStyle(document.body).getPropertyValue('--bg').trim(),
+      layoutMarginLeft: layout ? getComputedStyle(layout).marginLeft : null,
+      mainShellPaddingRight: mainShell ? getComputedStyle(mainShell).paddingRight : null,
+      mainMargin: main ? getComputedStyle(main).margin : null,
+      mainPadding: main ? getComputedStyle(main).padding : null,
+      mainWidth: main?.getBoundingClientRect().width ?? 0,
+      viewportWidth: window.innerWidth,
+    };
+  });
+  expect(printState.theme).toBe('dark');
+  expect(printState.pathname).toBe('/objects/7');
+  expect(printState.printMediaMatches).toBe(true);
+  expect(printState.hiddenControlsAreHidden).toBe(true);
+  expect(printState.sidebarIsHidden).toBe(true);
+  await expect(page.getByTestId('risk-plain-summary')).toBeVisible();
+  expect(printState.bodyBackground).toBe('rgb(255, 255, 255)');
+  expect(printState.bodyColor).toBe('rgb(0, 0, 0)');
+  expect(printState.rootBgToken).toBe('#fff');
+  expect(printState.bodyBgToken).toBe('#fff');
+  expect(printState.layoutMarginLeft).toBe('0px');
+  expect(printState.mainShellPaddingRight).toBe('0px');
+  expect(printState.mainMargin).toBe('0px');
+  expect(printState.mainPadding).toBe('0px');
+  expect(printState.mainWidth).toBeGreaterThan(0);
+  expect(printState.mainWidth).toBe(printState.viewportWidth);
+  await screenshot(page, 'object-dossier-print');
+  expectCleanBrowser(harness);
+});
+
+test('mocked logout sends the bearer token and does not restore it on reload', async ({ page }) => {
+  const harness = await installMocks(page, 'mio_officer');
+  await page.goto('/work');
+  await page.getByRole('button', { name: 'Меню пользователя' }).first().click();
+  await page.getByRole('menuitem', { name: 'Выйти' }).click();
+  await expect(page).toHaveURL(/\/login$/);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('saq_token'))).toBeNull();
+  expect(harness.logoutAuthorization).toBe('Bearer mock-ui-session');
+  expect(harness.mutations.filter((item) => item.method === 'POST' && item.path === '/auth/logout')).toHaveLength(1);
+
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Вход в систему' })).toBeVisible();
+  await page.goto('/work');
+  await expect(page).toHaveURL(/\/login$/);
+  expect(harness.pageErrors).toEqual([]);
 });

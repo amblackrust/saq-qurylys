@@ -7,6 +7,8 @@ import { useSignals } from '@/api/hooks/signals';
 import type { SignalRow, SignalStatus } from '@/api/types';
 import { useAuth } from '@/auth/useAuth';
 import { EmptyState, ErrorBlock, LoadingBlock } from '@/components/QueryState';
+import { ReportCard } from './ReportCard';
+import { MyAssignments } from './MyAssignments';
 
 type QueueStatus = Exclude<SignalStatus, 'closed'>;
 type SignalQuery = ReturnType<typeof useSignals>;
@@ -53,7 +55,7 @@ function SignalLink({ row, language }: { row: SignalRow; language: string }) {
 
 export function WorkPage() {
   const { t, i18n } = useTranslation();
-  const { isAdmin } = useAuth();
+  const { isAdmin, canEditRegistry } = useAuth();
   const [requestedStatus, setRequestedStatus] = useState<QueueStatus | null>(null);
   const returned = useSignals({ status: 'returned', limit: 3 });
   const requiresConfirmation = useSignals({ status: 'requires_confirmation', limit: 3 });
@@ -119,7 +121,9 @@ export function WorkPage() {
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div className="max-w-3xl space-y-1.5">
           <h1>{isAdmin ? t('work.adminTitle') : t('work.title')}</h1>
-          {isAdmin && <p className="m-0 max-w-2xl text-base leading-6 text-text-2">{t('work.adminIntro')}</p>}
+          <p className="m-0 max-w-2xl text-base leading-6 text-text-2">
+            {isAdmin ? t('work.adminIntro') : t('work.intro')}
+          </p>
           {isAdmin && <p className="m-0 text-sm text-text-2">{t('work.adminReadOnly')}</p>}
         </div>
         {primaryHref && primaryLabel && (
@@ -132,6 +136,8 @@ export function WorkPage() {
         )}
       </header>
 
+      {canEditRegistry && <MyAssignments />}
+
       <div className="space-y-6">
         <section aria-labelledby="work-queues-title" className="min-w-0">
           <div className="mb-3 flex items-end justify-between gap-3 border-b border-border pb-3">
@@ -139,7 +145,6 @@ export function WorkPage() {
               {t('work.queuesTitle')}
             </h2>
           </div>
-
           <div className="grid min-w-0 items-start overflow-hidden rounded-xl border border-border bg-surface lg:grid-cols-[16rem_minmax(0,1fr)]">
             <nav aria-label={t('work.queuesTitle')} className="grid grid-cols-1 gap-2 border-b border-border p-2 sm:grid-cols-2 sm:p-3 lg:grid-cols-1 lg:gap-1 lg:border-r lg:border-b-0">
               {queues.map(({ status, title, query }) => (
@@ -224,6 +229,7 @@ export function WorkPage() {
           </Link>
         </section>
       </div>
+      <ReportCard />
     </div>
   );
 }

@@ -173,6 +173,7 @@ const enums: typeof ru = {
     capture_failed: 'Жарияланымды тіркеу мүмкін болмады',
     citizen_report: 'Азаматтан жаңа хабарлама',
     collector_failed: 'Дереккөзден жарияланымдарды жинау сәтсіз аяқталды',
+    assignment_new: 'Сізге объектіні тексеру тапсырылды',
     pdf_archive_failed: 'Карточка PDF-нің мұрағаттық көшірмесін сақтау мүмкін болмады',
   },
   holiday_kind: { holiday: 'Мерекелік күн', workday: 'Жұмыс күні (ауыстырылған)' },
@@ -206,6 +207,11 @@ const enums: typeof ru = {
     confirmed: 'Расталған',
     absent_established: 'Жоқ екені анықталған',
     unknown: 'Анықталмаған',
+  },
+  confidence_level: {
+    high: 'жоғары',
+    medium: 'орташа',
+    low: 'төмен',
   },
   needs_check: {
     legal_basis_unknown: 'Құқықтық негіз тексерілмеген',

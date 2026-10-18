@@ -1,14 +1,16 @@
 import { IconAlertTriangle, IconCircleCheck, IconInfoCircle, IconLoader2, IconAlertOctagon } from '@tabler/icons-react';
 import { Toaster as Sonner, type ToasterProps } from 'sonner';
+import { useTheme } from '@/theme/ThemeProvider';
 
 /**
- * Mount once (Providers.tsx does). Raised surface; a colored bar on the left tells the kind: pink for success,
+ * Mount once (Providers.tsx does). Raised surface; a colored bar on the left tells the kind: accent for success,
  * red for errors. Use `toast` from `@/lib/toast`, not sonner directly.
  */
 function Toaster(props: ToasterProps) {
+  const { resolvedTheme } = useTheme();
   return (
     <Sonner
-      theme="dark"
+      theme={resolvedTheme}
       position="top-right"
       visibleToasts={4}
       icons={{

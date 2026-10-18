@@ -13,6 +13,7 @@ from app.deps import SessionDep
 from app.errors import api_error, register_error_handlers
 from app.modules.activity.router import router as activity_router
 from app.modules.ads.router import router as ads_router
+from app.modules.assignments.router import router as assignments_router
 from app.modules.assistant.router import router as assistant_router
 from app.modules.audit.router import router as audit_router
 from app.modules.auth.router import router as auth_router
@@ -30,6 +31,7 @@ from app.modules.notifications.router import router as notifications_router
 from app.modules.objects.router import router as objects_router
 from app.modules.registry_sync.router import router as registry_sync_router
 from app.modules.risk.router import router as risk_router
+from app.modules.search.router import router as search_router
 from app.modules.settings.router import router as settings_router
 from app.modules.signals.router import router as signals_router
 from app.modules.territories.router import router as territories_router
@@ -95,6 +97,7 @@ for module_router in (
     holidays_router,
     developers_router,
     objects_router,
+    search_router,
     documents_router,
     inspections_router,
     complaints_router,
@@ -111,6 +114,7 @@ for module_router in (
     nlp_router,
     risk_router,
     signals_router,
+    assignments_router,
 ):
     api.include_router(module_router)
 
