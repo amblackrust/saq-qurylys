@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { IconFileSpreadsheet, IconPlus } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
-import { Link, useNavigate, useSearchParams } from 'react-router';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { buildQuery, downloadFile } from '@/api/client';
 import { useSignals } from '@/api/hooks/signals';
 import { errorMessage } from '@/api/queryClient';
@@ -36,7 +36,16 @@ function parsePositiveInt(value: string | null): number | undefined {
 
 const col = dataColumns<SignalRow>();
 const FILTER_STATUSES: SignalStatus[] = ['requires_confirmation', 'returned', 'responded', 'sent', 'closed'];
-const RECIPIENT_FILTER_STATUSES: SignalStatus[] = ['sent', 'responded', 'closed'];
+const STATUS_GROUPS = [
+  { key: 'action', statuses: ['requires_confirmation', 'returned', 'responded'] as SignalStatus[] },
+  { key: 'waiting', statuses: ['sent'] as SignalStatus[] },
+  { key: 'history', statuses: ['closed'] as SignalStatus[] },
+];
+const RECIPIENT_STATUS_GROUPS = [
+  { key: 'action', statuses: ['sent'] as SignalStatus[] },
+  { key: 'answered', statuses: ['responded'] as SignalStatus[] },
+  { key: 'history', statuses: ['closed'] as SignalStatus[] },
+];
 
 export function SignalsPage() {
   const { t } = useTranslation('signals');
@@ -44,15 +53,19 @@ export function SignalsPage() {
   const e = useEnum();
   const { dateTime } = useFormat();
   const navigate = useNavigate();
+  const location = useLocation();
   const [params, setParams] = useSearchParams();
   const [createOpen, setCreateOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
 
-  const status = parseStatus(params.get('status'));
+  const status = parseStatus(params.get('status')) ?? (isRecipient && params.get('scope') !== 'all' ? 'sent' : undefined);
   // Recipients only see their own cards and cannot browse the registry, so the object filter is not offered to them.
   const objectId = isRecipient ? undefined : parsePositiveInt(params.get('object_id'));
   const pageIndex = (parsePositiveInt(params.get('page')) ?? 1) - 1;
   const hasFilters = status !== undefined || objectId !== undefined;
+  const hasExplicitFilters = params.has('status') || objectId !== undefined;
+  const returnTo = `/signals${location.search}`;
+  const detailHref = (id: number) => `/signals/${id}?${new URLSearchParams({ returnTo }).toString()}`;
 
   const filters = { status, object_id: objectId };
   const query = useSignals({ ...filters, limit: PAGE_SIZE, offset: pageIndex * PAGE_SIZE });
@@ -89,7 +102,7 @@ export function SignalsPage() {
     col.accessor('number', {
       header: t('list.columns.number'),
       cell: (info) => (
-        <Link to={`/signals/${info.row.original.id}`} className="text-link hover:underline" onClick={(event) => event.stopPropagation()}>
+        <Link to={detailHref(info.row.original.id)} className="text-link hover:underline" onClick={(event) => event.stopPropagation()}>
           {info.getValue()}
         </Link>
       ),
@@ -149,7 +162,7 @@ export function SignalsPage() {
   ]);
 
   let emptyText = t('list.empty.admin');
-  if (hasFilters) emptyText = t('list.empty.filtered');
+  if (hasFilters && !(isRecipient && status === 'sent' && params.get('scope') !== 'all')) emptyText = t('list.empty.filtered');
   else if (canManageSignals) emptyText = t('list.empty.manage');
   else if (isRecipient) emptyText = t('list.empty.recipient');
 
@@ -185,33 +198,38 @@ export function SignalsPage() {
           <p className="mb-3 text-base font-semibold text-text">{t('list.filters.status')}</p>
           <div role="group" aria-label={t('list.filters.status')} className="flex flex-col gap-1">
             <Button
-              variant={status === undefined ? 'default' : 'outline'}
+              variant={(isRecipient ? params.get('scope') === 'all' : status === undefined) ? 'default' : 'outline'}
               className="min-h-11 justify-start"
-              aria-pressed={status === undefined}
-              onClick={() => setParam({ status: null, page: null })}
+              aria-pressed={isRecipient ? params.get('scope') === 'all' : status === undefined}
+              onClick={() => setParam({ status: null, scope: isRecipient ? 'all' : null, page: null })}
             >
               {t('list.filters.all')}
             </Button>
-            {(isRecipient ? RECIPIENT_FILTER_STATUSES : FILTER_STATUSES).map((filterStatus) => (
-              <Button
-                key={filterStatus}
-                variant={status === filterStatus ? 'default' : 'outline'}
-                className="min-h-11 justify-start"
-                aria-pressed={status === filterStatus}
-                onClick={() => setParam({ status: filterStatus, page: null })}
-              >
-                {t(`statusLabels.${filterStatus}`)}
-              </Button>
+            {(isRecipient ? RECIPIENT_STATUS_GROUPS : canManageSignals ? STATUS_GROUPS : [{ key: 'overview', statuses: FILTER_STATUSES }]).map((group) => (
+              <div key={group.key} className="grid gap-1.5">
+                <p className="pt-2 text-xs font-semibold uppercase tracking-wide text-text-3">{t(`list.filters.groups.${group.key}`)}</p>
+                {group.statuses.map((filterStatus) => (
+                  <Button
+                    key={filterStatus}
+                    variant={status === filterStatus ? 'default' : 'outline'}
+                    className="min-h-11 justify-start"
+                    aria-pressed={status === filterStatus}
+                    onClick={() => setParam({ status: filterStatus, scope: null, page: null })}
+                  >
+                    {t(`statusLabels.${filterStatus}`)}
+                  </Button>
+                ))}
+              </div>
             ))}
           </div>
         </div>
         {isRecipient ? (
-          status !== undefined && (
+          hasExplicitFilters && (
             <div>
               <Button
                 variant="secondary"
                 className="min-h-11"
-                onClick={() => setParam({ status: null, object_id: null, page: null })}
+                onClick={() => setParam({ status: null, scope: null, object_id: null, page: null })}
               >
                 {t('list.filters.clear')}
               </Button>
@@ -248,7 +266,7 @@ export function SignalsPage() {
           pageIndex={pageIndex}
           pageSize={PAGE_SIZE}
           onPageChange={(next) => setParam({ page: next === 0 ? null : String(next + 1) })}
-          onRowClick={(row) => void navigate(`/signals/${row.id}`)}
+          onRowClick={(row) => void navigate(detailHref(row.id))}
           getRowId={(row) => String(row.id)}
           loading={query.isPending}
           fetching={query.isFetching}

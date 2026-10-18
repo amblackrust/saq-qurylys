@@ -1,6 +1,6 @@
 import { IconAlertTriangle, IconArrowLeft, IconCheck, IconChevronDown, IconMessage } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router';
+import { Link, useBlocker, useLocation } from 'react-router';
 import { useUpdateSignal } from '@/api/hooks/signals';
 import type { SignalDetail } from '@/api/types';
 import { useAuth } from '@/auth/useAuth';
@@ -21,6 +21,16 @@ import { SignalStatusChip } from './SignalStatusChip';
 import { UnsavedBar } from './UnsavedBar';
 import { useApplySignal } from './useApplySignal';
 import { useSignalDraft } from './useSignalDraft';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { NoteSection } from './sections/NoteSection';
 import { ObjectDeveloperSection } from './sections/ObjectDeveloperSection';
 import { PermitChecksSection } from './sections/PermitChecksSection';
@@ -39,9 +49,13 @@ export function SignalCard({ detail }: { detail: SignalDetail }) {
   const update = useUpdateSignal();
   const apply = useApplySignal();
   const { sections, status } = detail;
+  const blocker = useBlocker(draft.dirty);
+  const location = useLocation();
+  const returnTo = safeReturnTo(new URLSearchParams(location.search).get('returnTo'));
 
   const editable = canManageSignals && (status === 'requires_confirmation' || status === 'returned');
   const hasResponse = (status === 'responded' || status === 'closed') && detail.response_text;
+  const collapseSecondarySections = status === 'sent' || status === 'responded' || status === 'closed';
   const currentStep = status === 'sent' ? 2 : status === 'responded' ? 3 : status === 'closed' ? null : 0;
 
   let nextStepTitle: string;
@@ -86,9 +100,28 @@ export function SignalCard({ detail }: { detail: SignalDetail }) {
       },
     );
 
+  const reviewFields = (
+    <div className="grid min-w-0 gap-6">
+      <SchemePaymentsSection
+        value={draft.value.scheme_payments}
+        editable={editable}
+        onChange={(next) => draft.update({ scheme_payments: next })}
+      />
+      <ProposedMeasuresSection
+        value={draft.value.proposed_measures}
+        editable={editable}
+        onChange={(next) => draft.update({ proposed_measures: next })}
+      />
+      <NoteSection value={draft.value.note} editable={editable} onChange={(next) => draft.update({ note: next })} />
+    </div>
+  );
+  const routeFields = (
+    <RouteSection detail={detail} value={draft.value} editable={editable} onChange={draft.update} />
+  );
+
   return (
     <div className="flex flex-col gap-4">
-      <Link to="/signals" className="inline-flex min-h-11 items-center gap-1 self-start px-1 text-sm text-link hover:underline">
+      <Link to={returnTo} className="inline-flex min-h-11 items-center gap-1 self-start px-1 text-sm text-link hover:underline">
         <IconArrowLeft size={16} aria-hidden />
         {t('detail.back')}
       </Link>
@@ -103,9 +136,22 @@ export function SignalCard({ detail }: { detail: SignalDetail }) {
           </span>
         }
       />
-      <div className="grid min-w-0 items-start gap-8 xl:grid-cols-[minmax(0,1fr)_20rem]">
-      <div className="order-2 grid min-w-0 gap-8 xl:order-1">
-      {status === 'returned' && detail.return_comment && (
+      {status === 'requires_confirmation' && (
+        <Callout icon={<IconAlertTriangle size={18} />} title={t('detail.prepareSummary.title')}>
+          <p>{t('detail.prepareSummary.copy')}</p>
+          {editable ? (
+            <p className="mt-1">
+              <button type="button" className="text-link underline" onClick={() => focusSignalField('signal-recipient')}>{t('detail.prepareSummary.route')}</button>
+            </p>
+          ) : (
+            <p className="mt-1">{t('detail.prepareSummary.readOnly', {
+              recipient: draft.value.recipient ? e('recipient', draft.value.recipient) : '—',
+              days: draft.value.review_days === '' ? '—' : t('reviewDays', { count: draft.value.review_days }),
+            })}</p>
+          )}
+        </Callout>
+      )}
+      {status === 'returned' && (
         <Callout
           tone="warning"
           icon={<IconAlertTriangle size={18} />}
@@ -113,7 +159,7 @@ export function SignalCard({ detail }: { detail: SignalDetail }) {
           meta={canManageSignals && t('detail.returnedHint')}
           multiline
         >
-          {detail.return_comment}
+          {detail.return_comment || t('detail.returnedNoComment')}
         </Callout>
       )}
       {hasResponse && (
@@ -126,7 +172,22 @@ export function SignalCard({ detail }: { detail: SignalDetail }) {
           {detail.response_text}
         </Callout>
       )}
-
+      {status === 'sent' && (
+        <Callout icon={<IconMessage size={18} />} title={t('detail.waitingSummary.title')} meta={t('detail.waitingSummary.meta', { recipient: e('recipient', detail.recipient) })}>
+          <p>{t('detail.waitingSummary.copy')}</p>
+          <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm">
+            {detail.sent_at && <span><strong>{t('detail.fields.sentAt')}: </strong>{dateTime(detail.sent_at)}</span>}
+            {detail.due_date && <span><strong>{t('detail.next.deadline')}: </strong><DueInfo dueDate={detail.due_date} status={status} isOverdue={detail.is_overdue} /></span>}
+          </div>
+        </Callout>
+      )}
+      {status === 'closed' && (
+        <Callout icon={<IconCheck size={18} />} title={t('detail.closedSummary.title')} meta={t('detail.closedSummary.meta')}>
+          <p>{t('detail.closedSummary.copy')}</p>
+        </Callout>
+      )}
+      <div className="grid min-w-0 items-start gap-8 xl:grid-cols-[minmax(0,1fr)_20rem]">
+      <div className="order-2 grid min-w-0 gap-8 xl:order-1">
       <section aria-labelledby="signal-materials-heading" className="grid min-w-0 gap-4">
         <h2 id="signal-materials-heading" className="text-base font-semibold text-text">
           {t('detail.groups.materials')}
@@ -139,31 +200,35 @@ export function SignalCard({ detail }: { detail: SignalDetail }) {
         </div>
       </section>
 
-      <section aria-labelledby="signal-review-heading" className="grid min-w-0 gap-4">
-        <h2 id="signal-review-heading" className="text-base font-semibold text-text">
-          {t('detail.groups.review')}
-        </h2>
-        <div className="grid min-w-0 gap-6">
-          <SchemePaymentsSection
-            value={draft.value.scheme_payments}
-            editable={editable}
-            onChange={(next) => draft.update({ scheme_payments: next })}
-          />
-          <ProposedMeasuresSection
-            value={draft.value.proposed_measures}
-            editable={editable}
-            onChange={(next) => draft.update({ proposed_measures: next })}
-          />
-          <NoteSection value={draft.value.note} editable={editable} onChange={(next) => draft.update({ note: next })} />
-        </div>
-      </section>
+      {collapseSecondarySections ? (
+        <details className="group border-t border-border pt-4">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 text-base font-semibold text-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus">
+            {t('detail.groups.review')}
+            <IconChevronDown size={16} aria-hidden className="shrink-0 transition-transform duration-200 group-open:rotate-180 motion-reduce:transition-none" />
+          </summary>
+          <div className="grid gap-4 pt-3">{reviewFields}</div>
+        </details>
+      ) : (
+        <section aria-labelledby="signal-review-heading" className="grid min-w-0 gap-4">
+          <h2 id="signal-review-heading" className="text-base font-semibold text-text">{t('detail.groups.review')}</h2>
+          {reviewFields}
+        </section>
+      )}
 
-      <section aria-labelledby="signal-route-heading" className="grid min-w-0 gap-4">
-        <h2 id="signal-route-heading" className="text-base font-semibold text-text">
-          {t('detail.groups.route')}
-        </h2>
-        <RouteSection detail={detail} value={draft.value} editable={editable} onChange={draft.update} />
-      </section>
+      {collapseSecondarySections ? (
+        <details className="group border-t border-border pt-4">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 text-base font-semibold text-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus">
+            {t('detail.groups.route')}
+            <IconChevronDown size={16} aria-hidden className="shrink-0 transition-transform duration-200 group-open:rotate-180 motion-reduce:transition-none" />
+          </summary>
+          <div className="pt-3">{routeFields}</div>
+        </details>
+      ) : (
+        <section aria-labelledby="signal-route-heading" className="grid min-w-0 gap-4">
+          <h2 id="signal-route-heading" className="text-base font-semibold text-text">{t('detail.groups.route')}</h2>
+          {routeFields}
+        </section>
+      )}
 
       {!isRecipient && (
         <details className="group border-t border-border pt-4">
@@ -223,7 +288,8 @@ export function SignalCard({ detail }: { detail: SignalDetail }) {
           <p className="mt-2 text-base leading-relaxed text-text-2">{nextStepCopy}</p>
           {canManageSignals && status === 'requires_confirmation' && (
             <ul className="mt-2 flex flex-col gap-1 text-sm text-text-2">
-              {!draft.value.recipient && <li>{t('actions.needRecipient')}</li>}
+              {!draft.value.recipient && <li><button type="button" className="text-link underline" onClick={() => focusSignalField('signal-recipient')}>{t('actions.needRecipient')}</button></li>}
+              {draft.value.review_days === '' && <li><button type="button" className="text-link underline" onClick={() => focusSignalField('signal-review-days')}>{t('route.reviewDaysRequired')}</button></li>}
               {draft.dirty && !draft.valid && <li className="text-zone-red-ink">{t('unsaved.invalid')}</li>}
               {draft.dirty && draft.valid && <li>{t('actions.saveFirst')}</li>}
             </ul>
@@ -280,6 +346,33 @@ export function SignalCard({ detail }: { detail: SignalDetail }) {
           onDiscard={draft.reset}
         />
       )}
+      <AlertDialog open={blocker.state === 'blocked'}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('unsaved.leaveTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>{t('unsaved.leaveDescription')}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => blocker.reset?.()}>{t('unsaved.stay')}</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => blocker.proceed?.()}>
+              {t('unsaved.leave')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
+}
+
+function safeReturnTo(value: string | null) {
+  if (!value || !value.startsWith('/signals?') || value.startsWith('//')) return '/signals';
+  const url = new URL(value, window.location.origin);
+  if (url.origin !== window.location.origin || url.pathname !== '/signals') return '/signals';
+  return `${url.pathname}${url.search}`;
+}
+
+function focusSignalField(id: string) {
+  const field = document.getElementById(id);
+  field?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  if (field instanceof HTMLElement) field.focus({ preventScroll: true });
 }

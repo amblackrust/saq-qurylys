@@ -28,6 +28,7 @@ export function RouteSection({ detail, value, editable, onChange }: Props) {
       <Panel title={t('sections.route')}>
         <div className="flex flex-col gap-3.5">
           <SelectInput
+            id="signal-recipient"
             label={t('route.recipient')}
             placeholder={t('route.recipientPlaceholder')}
             data={enumOptions('recipient', RECIPIENTS)}
@@ -35,6 +36,7 @@ export function RouteSection({ detail, value, editable, onChange }: Props) {
             onChange={(next) => onChange({ recipient: RECIPIENTS.find((code) => code === next) ?? null })}
           />
           <NumberInput
+            id="signal-review-days"
             label={t('route.reviewDays')}
             value={value.review_days}
             onChange={(next) => onChange({ review_days: typeof next === 'number' ? next : '' })}

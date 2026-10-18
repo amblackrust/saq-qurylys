@@ -30,11 +30,13 @@ export function useSignalDraft(detail: SignalDetail) {
   const dirty = changes !== null && JSON.stringify(changes) !== JSON.stringify(base);
   const valid = value.review_days !== '' && value.review_days >= 1;
 
-  // In-app navigation cannot be intercepted (the app uses BrowserRouter, not a data router),
-  // so the browser's own prompt covers reload and tab close.
+  // The blocker in SignalCard handles SPA navigation; this covers reload and tab close.
   useEffect(() => {
     if (!dirty) return;
-    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [dirty]);
