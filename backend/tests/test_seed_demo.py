@@ -12,8 +12,19 @@ from sqlalchemy.orm import Session
 
 from app import seed, seed_history
 from app.config import get_settings
-from app.models import AdPost, Complaint, ConstructionObject, Developer, District, Document, PhraseHit, RiskScore
-from app.models.enums import CheckStatus, DocType, PhraseCategory, ScoreTrigger, Zone
+from app.models import (
+    AdPost,
+    AppUser,
+    Complaint,
+    ConstructionObject,
+    Developer,
+    District,
+    Document,
+    Holiday,
+    PhraseHit,
+    RiskScore,
+)
+from app.models.enums import CheckStatus, DocType, HolidayKind, PhraseCategory, Role, ScoreTrigger, Zone
 from app.modules.graph.service import build_graph
 from app.modules.graph.suggestions import list_suggestions
 from app.modules.nlp.service import analyze_ad
@@ -458,6 +469,68 @@ class _Borrowed:
         return None
 
 
+def test_if_empty_skips_an_initialized_database_without_overwriting_existing_data(
+    db: Session, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    day = date(2026, 1, 1)
+    user = AppUser(username="existing", full_name="Existing", password_hash="hash", role=Role.admin)
+    holiday = Holiday(day=day, kind=HolidayKind.workday, name="Locally edited")
+    db.add_all([user, holiday])
+    db.flush()
+    monkeypatch.setattr(seed, "get_sessionmaker", lambda: lambda: _Borrowed(db))
+
+    def unexpected_write(*args: object, **kwargs: object) -> None:
+        pytest.fail("--if-empty must skip all seed writes when application data exists")
+
+    monkeypatch.setattr(seed, "seed_reference", unexpected_write)
+    monkeypatch.setattr(seed, "load_districts", unexpected_write)
+    monkeypatch.setattr(seed, "load_holidays", unexpected_write)
+
+    seed.run(demo=True, if_empty=True)
+
+    saved_holiday = db.get(Holiday, day)
+    assert saved_holiday is not None and saved_holiday.name == "Locally edited"
+    assert "Application data already exists; skipping all seed operations." in capsys.readouterr().out
+
+
+def test_if_empty_rolls_back_a_failed_demo_seed_and_can_retry(
+    db: Session, bucket: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(seed, "get_sessionmaker", lambda: lambda: _Borrowed(db))
+    original_seed_demo_objects = seed.seed_demo_objects
+    attempts = 0
+
+    def fail_once(session: Session, filename: str = "demo_objects.json") -> list[int]:
+        nonlocal attempts
+        object_ids = original_seed_demo_objects(session, filename)
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("injected demo seed failure")
+        return object_ids
+
+    monkeypatch.setattr(seed, "seed_demo_objects", fail_once)
+
+    with pytest.raises(RuntimeError, match="injected demo seed failure"):
+        seed.run(demo=True, if_empty=True)
+
+    assert db.scalar(select(func.count()).select_from(AppUser)) == 0
+    assert db.scalar(select(func.count()).select_from(ConstructionObject)) == 0
+
+    seed.run(demo=True, if_empty=True)
+
+    demo_objects = db.scalar(
+        select(func.count()).select_from(ConstructionObject).where(ConstructionObject.is_demo.is_(True))
+    )
+    assert demo_objects == len(DEMO["objects"]) + len(NETWORK["objects"]) + 1
+
+
+def test_if_empty_rejects_pilot_and_replay_options_before_opening_a_session() -> None:
+    with pytest.raises(ValueError, match="cannot be combined"):
+        seed.run(demo=True, pilot=True, if_empty=True)
+    with pytest.raises(ValueError, match="cannot be combined"):
+        seed.run(demo=True, replay_history=True, if_empty=True)
+
+
 def _replayed(db: Session, name: str) -> list[RiskScore]:
     obj = _by_name(db, name)
     return list(
@@ -677,7 +750,7 @@ def test_replay_history_flag_recomputes_the_history_of_every_object(
     assert _zone_path(_replayed(db, GOLDEN_AUTUMN)) == [Zone.green, Zone.yellow, Zone.red]
 
 
-def test_demo_loading_stores_the_replayed_history(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_demo_loading_stores_the_replayed_history(db: Session, bucket: str, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(seed, "get_sessionmaker", lambda: lambda: _Borrowed(db))
 
     seed.run(demo=True)

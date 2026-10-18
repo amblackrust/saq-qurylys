@@ -1,11 +1,12 @@
-"""Idempotent database seed: `python -m app.seed [--pilot] [--demo] [--replay-history]`.
+"""Idempotent database seed: `python -m app.seed [--pilot] [--demo] [--if-empty] [--replay-history]`.
 
-Reference data (territories, risk factors, phrases, settings) and the initial admin are always
-created when missing and never overwritten. Optional files in app/seed_data/ are described in
+Reference data (territories, risk factors, phrases, settings) and the initial admin are created when missing.
+District and holiday seed files may refresh existing values. Optional files in app/seed_data/ are described in
 app/seed_data/README.md. `--pilot` additionally imports the public snapshot of real objects of the pilot city,
 `--demo` loads demo users and the fictional demo_objects.json and demo_network.json, the first with its dated
 history (demo_history.json); `--replay-history` recomputes the replayed score history of every object (the time
-machine, SPEC 10.5).
+machine, SPEC 10.5). `--if-empty` loads reference and demo data in one transaction, only when application data is
+absent; it cannot be combined with `--pilot` or `--replay-history`.
 """
 
 import argparse
@@ -650,35 +651,69 @@ def dispatch_demo_processing(ads: list[tuple[int, int]], objects_without_ads: li
     objects_changed(objects_without_ads)
 
 
-def run(demo: bool, pilot: bool = False, replay_history: bool = False) -> None:
-    from app import seed_history  # imported here: it builds on the models of this module
+def _has_application_data(session: Session) -> bool:
+    """Return whether startup seeding could overwrite data in an initialized application database."""
+    return any(
+        session.scalar(select(primary_key).limit(1)) is not None
+        for primary_key in (AppUser.id, ConstructionObject.id, Territory.id, District.id, Holiday.day)
+    )
+
+
+def _seed_demo(session: Session) -> tuple[list[tuple[str, str]], list[tuple[int, int]], list[int]]:
+    from app import seed_history
+    from app.seed_versions import seed_demo_versions
+
+    credentials = seed_demo_users(session)
+    object_ids = seed_demo_objects(session) + seed_demo_objects(session, DEMO_NETWORK_FILE)
+    object_ids += seed_demo_versions(session)
+    ads = [
+        (row.id, row.object_id)
+        for row in session.execute(select(AdPost.id, AdPost.object_id).where(AdPost.object_id.in_(object_ids)))
+    ]
+    seed_history.seed_demo_history(session, object_ids)
+    return credentials, ads, object_ids
+
+
+def run(demo: bool, pilot: bool = False, replay_history: bool = False, if_empty: bool = False) -> None:
+    if if_empty and (not demo or pilot or replay_history):
+        raise ValueError("--if-empty requires --demo and cannot be combined with --pilot or --replay-history")
 
     factory = get_sessionmaker()
-    with factory() as session:
-        seed_reference(session)
-        districts = load_districts(session)
-        holidays = load_holidays(session)
-        session.commit()
-        logger.info("Reference data ready (districts: %s, holiday entries: %s)", districts, holidays)
+    if if_empty:
+        with factory() as session:
+            if _has_application_data(session):
+                message = "Application data already exists; skipping all seed operations."
+                logger.info(message)
+                print(message)
+                return
+            with session.begin_nested():
+                seed_reference(session)
+                districts = load_districts(session)
+                holidays = load_holidays(session)
+                credentials, ads, object_ids = _seed_demo(session)
+            session.commit()
+            logger.info("Reference data ready (districts: %s, holiday entries: %s)", districts, holidays)
+    else:
+        with factory() as session:
+            seed_reference(session)
+            districts = load_districts(session)
+            holidays = load_holidays(session)
+            session.commit()
+            logger.info("Reference data ready (districts: %s, holiday entries: %s)", districts, holidays)
 
-    if pilot:
-        run_pilot(factory)
-    if replay_history:
-        seed_history.replay_all(factory)
-    if not demo:
-        return
-    from app.seed_versions import seed_demo_versions  # imported here: that module builds on this one
+        if pilot:
+            run_pilot(factory)
+        if replay_history:
+            from app import seed_history
 
-    with factory() as session:
-        credentials = seed_demo_users(session)
-        object_ids = seed_demo_objects(session) + seed_demo_objects(session, DEMO_NETWORK_FILE)
-        object_ids += seed_demo_versions(session)
-        ads = [
-            (row.id, row.object_id)
-            for row in session.execute(select(AdPost.id, AdPost.object_id).where(AdPost.object_id.in_(object_ids)))
-        ]
-        seed_history.seed_demo_history(session, object_ids)  # after `ads`: the older ads need no processing chain
-        session.commit()
+            seed_history.replay_all(factory)
+        if not demo:
+            return
+
+        with factory() as session:
+            credentials, ads, object_ids = _seed_demo(session)
+            session.commit()
+
     for username, password in credentials:
         print(f"demo user {username}: {password}")  # shown once; only the hash is stored
     if credentials:
@@ -693,13 +728,22 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--pilot", action="store_true", help="also import the public snapshot of real pilot objects")
     parser.add_argument("--demo", action="store_true", help="also load demo users and demo_objects.json")
     parser.add_argument(
+        "--if-empty",
+        action="store_true",
+        help="with --demo, seed reference and demo data atomically only when the database is empty",
+    )
+    parser.add_argument(
         "--replay-history",
         action="store_true",
         help="recompute the replayed score history (last 26 weeks, weekly) of every object",
     )
     args = parser.parse_args(argv)
+    if args.if_empty and not args.demo:
+        parser.error("--if-empty requires --demo")
+    if args.if_empty and (args.pilot or args.replay_history):
+        parser.error("--if-empty cannot be combined with --pilot or --replay-history")
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s", stream=sys.stderr)
-    run(demo=args.demo, pilot=args.pilot, replay_history=args.replay_history)
+    run(demo=args.demo, pilot=args.pilot, replay_history=args.replay_history, if_empty=args.if_empty)
 
 
 if __name__ == "__main__":
