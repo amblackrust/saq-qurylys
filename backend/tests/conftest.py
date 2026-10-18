@@ -4,10 +4,15 @@ A separate database is created for the session and migrated with Alembic. Each t
 transaction that is rolled back, so tests are isolated without truncating tables.
 """
 
+# Environment must be set before importing the application and its cached settings.
+# ruff: noqa: E402
+
 import os
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import uuid4
 
 # Environment must be set before `app` is imported: settings are read once and cached.
 os.environ.setdefault("TEST_DATABASE_URL", "postgresql+psycopg://saq:saq_dev_password@localhost:5433/saq_test")
@@ -16,11 +21,25 @@ os.environ["MIGRATION_DATABASE_URL"] = ""
 os.environ.setdefault("S3_ENDPOINT", "http://localhost:9000")
 os.environ.setdefault("S3_ACCESS_KEY", "saq-minio-dev")
 os.environ.setdefault("S3_SECRET_KEY", "saq-minio-dev-secret")
-# Parallel test runs (separate worktrees) need their own database and bucket: the bucket is emptied at the end.
-os.environ["S3_BUCKET_EVIDENCE"] = os.environ.get("TEST_S3_BUCKET", "evidence-test")
+
+
+def _test_bucket_name(prefix_variable: str, default_prefix: str, suffix: str) -> str:
+    prefix = os.environ.get(prefix_variable, default_prefix)
+    if len(prefix) > 46 or re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?", prefix) is None or ".." in prefix:
+        raise RuntimeError(f"{prefix_variable} must be a valid lowercase S3 bucket prefix of at most 46 characters")
+    return f"{prefix}-{suffix}"
+
+
+# Tests always use fresh, per-process buckets, even when the corresponding fixture was omitted.
+_TEST_BUCKET_SUFFIX = uuid4().hex[:16]
+_TEST_EVIDENCE_BUCKET = _test_bucket_name("TEST_S3_BUCKET", "evidence-test", _TEST_BUCKET_SUFFIX)
+_TEST_VISION_BUCKET = _test_bucket_name("TEST_S3_BUCKET_VISION", "vision-test", _TEST_BUCKET_SUFFIX)
+if _TEST_EVIDENCE_BUCKET == _TEST_VISION_BUCKET:
+    raise RuntimeError("evidence and vision test bucket names must be different")
+os.environ["S3_BUCKET_EVIDENCE"] = _TEST_EVIDENCE_BUCKET
 os.environ["VISION_ENABLED"] = "true"
 os.environ["ASSISTANT_ENABLED"] = "true"
-os.environ["S3_BUCKET_VISION"] = os.environ.get("TEST_S3_BUCKET_VISION", "vision-test")
+os.environ["S3_BUCKET_VISION"] = _TEST_VISION_BUCKET
 os.environ["EVIDENCE_LOCK_MODE"] = "GOVERNANCE"
 os.environ["EVIDENCE_RETENTION_DAYS"] = "1"
 os.environ["TSA_URL"] = ""
@@ -48,8 +67,8 @@ from minio.deleteobjects import DeleteObject
 from pwdlib import PasswordHash
 from pwdlib.hashers.argon2 import Argon2Hasher
 from redis import Redis
-from sqlalchemy import Engine, create_engine, select, text
-from sqlalchemy.engine import make_url
+from sqlalchemy import Engine, create_engine, select
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.orm import Session
 
 from app import security, seed, storage
@@ -64,6 +83,21 @@ from tests.support_collect import TEST_REDIS_URL
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 PASSWORD = "Passw0rd-for-tests"
+_TEST_DATABASE_NAME = re.compile(r"saq_test(?:_[A-Za-z0-9][A-Za-z0-9_-]*)?\Z")
+
+
+def _test_database_target() -> tuple[URL, str]:
+    """Refuse to run destructive test setup against a database that is not clearly test-only."""
+    test_url = make_url(os.environ["TEST_DATABASE_URL"])
+    runtime_url = make_url(os.environ["DATABASE_URL"])
+    database = test_url.database
+    if database is None or _TEST_DATABASE_NAME.fullmatch(database) is None:
+        raise RuntimeError(
+            "TEST_DATABASE_URL must target `saq_test` or a `saq_test_<name>` database; refusing to replace it"
+        )
+    if runtime_url != test_url:
+        raise RuntimeError("DATABASE_URL and TEST_DATABASE_URL must be the same test database URL")
+    return test_url, database
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -84,16 +118,17 @@ def login_counters() -> Iterator[None]:
 
 @pytest.fixture(scope="session")
 def engine() -> Iterator[Engine]:
-    url = make_url(os.environ["TEST_DATABASE_URL"])
+    url, database = _test_database_target()
     admin_engine = create_engine(url.set(database="postgres"), isolation_level="AUTOCOMMIT")
+    quoted_database = admin_engine.dialect.identifier_preparer.quote_identifier(database)
     with admin_engine.connect() as connection:
-        connection.execute(text(f'DROP DATABASE IF EXISTS "{url.database}" WITH (FORCE)'))
-        connection.execute(text(f'CREATE DATABASE "{url.database}"'))
+        connection.exec_driver_sql(f"DROP DATABASE IF EXISTS {quoted_database} WITH (FORCE)")
+        connection.exec_driver_sql(f"CREATE DATABASE {quoted_database}")
     command.upgrade(Config(str(BACKEND_DIR / "alembic.ini")), "head")
     yield get_engine()
     get_engine().dispose()
     with admin_engine.connect() as connection:
-        connection.execute(text(f'DROP DATABASE IF EXISTS "{url.database}" WITH (FORCE)'))
+        connection.exec_driver_sql(f"DROP DATABASE IF EXISTS {quoted_database} WITH (FORCE)")
     admin_engine.dispose()
 
 
@@ -107,20 +142,27 @@ def _empty_bucket(name: str) -> None:
     ]
     for error in client.remove_objects(name, versions, bypass_governance_mode=True):
         raise RuntimeError(f"could not clean test bucket: {error}")
+    client.remove_bucket(name)
 
 
 @pytest.fixture(scope="session")
 def bucket() -> Iterator[str]:
+    name = get_settings().s3_bucket_evidence
+    if storage.get_client().bucket_exists(name):
+        raise RuntimeError(f"refusing to use pre-existing test bucket {name!r}")
     storage.ensure_bucket()
-    yield get_settings().s3_bucket_evidence
-    _empty_bucket(get_settings().s3_bucket_evidence)
+    yield name
+    _empty_bucket(name)
 
 
 @pytest.fixture(scope="session")
 def vision_bucket() -> Iterator[str]:
+    name = get_settings().s3_bucket_vision
+    if storage.get_client().bucket_exists(name):
+        raise RuntimeError(f"refusing to use pre-existing test bucket {name!r}")
     storage.ensure_vision_bucket()
-    yield get_settings().s3_bucket_vision
-    _empty_bucket(get_settings().s3_bucket_vision)
+    yield name
+    _empty_bucket(name)
 
 
 @pytest.fixture

@@ -15,7 +15,7 @@ from app.errors import register_error_handlers
 from app.events import objects_changed
 from app.models import Developer, Evidence, SignalCard, Territory
 from app.models.enums import EvidenceKind, LockMode, Recipient, SignalOrigin, SignalStatus, TerritoryLevel
-from tests.conftest import World, auth, make_object
+from tests.conftest import World, _test_database_target, auth, make_object
 
 
 def _developer(db: Session, bin_: str = "123456789012") -> Developer:
@@ -23,6 +23,24 @@ def _developer(db: Session, bin_: str = "123456789012") -> Developer:
     db.add(developer)
     db.flush()
     return developer
+
+
+def test_test_database_target_is_restricted_to_test_databases(monkeypatch: pytest.MonkeyPatch) -> None:
+    safe_url = "postgresql+psycopg://localhost/saq_test"
+    monkeypatch.setenv("TEST_DATABASE_URL", safe_url)
+    monkeypatch.setenv("DATABASE_URL", safe_url)
+    assert _test_database_target()[1] == "saq_test"
+
+    unsafe_url = "postgresql+psycopg://localhost/production"
+    monkeypatch.setenv("TEST_DATABASE_URL", unsafe_url)
+    monkeypatch.setenv("DATABASE_URL", unsafe_url)
+    with pytest.raises(RuntimeError, match="saq_test"):
+        _test_database_target()
+
+    monkeypatch.setenv("TEST_DATABASE_URL", safe_url)
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://other-host/saq_test")
+    with pytest.raises(RuntimeError, match="same test database URL"):
+        _test_database_target()
 
 
 def test_developer_visibility_follows_objects(client: TestClient, db: Session, world: World) -> None:
