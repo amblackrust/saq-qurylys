@@ -16,3 +16,8 @@ playwright-report/
 *.session
 *.session-journal
 data_tmp/
+/video/
+/frontend/scripts/motion-export/
+/frontend/exports/
+/project-context.md
+*:Zone.Identifier

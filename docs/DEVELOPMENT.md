@@ -28,6 +28,12 @@
   (`auth.login_failed`).
 - **Tokens.** A token carries `app_user.token_version`. Logout (`POST /auth/logout`), a new password or deactivation
   raise it, which revokes all tokens of the user on every device.
+- **Пользовательские URL и медиа.** Захват произвольных URL и скачивание медиа выполняются сервером и Chromium из
+  сети приложения. Проверка DNS-ответа перед запросом снижает риск SSRF, но не устраняет DNS-rebinding между
+  проверкой и соединением. В production сетевыми правилами ограничьте исходящий трафик API и browser worker именно
+  для произвольных URL: блокируйте loopback, частные, link-local/metadata и другие непубличные адреса, сохраняя доступ
+  к публичным сайтам. Отдельно разрешите только необходимые внутренние назначения зависимостей приложения (DB,
+  Redis, MinIO). Эти ограничения зависят от окружения и не обеспечиваются локальным demo/dev-запуском.
 
 ## Backend on the host
 
@@ -40,8 +46,14 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy app tests
 uv run pytest                        # needs `docker compose up -d db redis minio`
 ```
 
-Tests create a separate `saq_test` database, run the Alembic migrations in it and use a real MinIO bucket
-(`evidence-test`). Override with `TEST_DATABASE_URL`, `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`.
+Tests create a separate database named `saq_test` or `saq_test_<suffix>` (the suffix must start with a letter or digit
+and contain only letters, digits, `_` or `-`) and run the Alembic migrations in it. The `bucket` and `vision_bucket`
+fixtures create per-process MinIO buckets with a random 16-character UUID suffix: `TEST_S3_BUCKET` defaults to
+`evidence-test`, and `TEST_S3_BUCKET_VISION` defaults to `vision-test`. They refuse to use a generated bucket that
+already exists and remove only their own buckets and object versions at session end. `DATABASE_URL` and
+`TEST_DATABASE_URL` must be exactly the same parsed URL, including driver, host, port, database, username, password
+and query parameters. Set `TEST_DATABASE_URL` along with `DATABASE_URL`, `TEST_S3_BUCKET`, `TEST_S3_BUCKET_VISION`,
+`S3_ENDPOINT`, `S3_ACCESS_KEY`, and `S3_SECRET_KEY` when overriding the defaults.
 Every test runs in a rolled-back transaction. The Celery hook `app.events.object_changed` is disabled in tests
 (`EVENTS_ENABLED=false`).
 
