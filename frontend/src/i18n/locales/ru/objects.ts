@@ -11,6 +11,9 @@ const objects = {
     workspace: { register: 'Реестр', filters: 'Поиск и отбор' },
     create: 'Создать объект',
     importCsv: 'Импорт CSV',
+    exportExcel: 'Скачать Excel',
+    exportError: 'Не удалось скачать реестр',
+    exportFilename: 'ЖК',
     search: 'Поиск по названию или коду',
     zoneFilter: 'Фильтр по зоне',
     filters: {

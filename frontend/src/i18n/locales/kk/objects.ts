@@ -14,6 +14,9 @@ const objects: typeof ru = {
     workspace: { register: 'Тізілім', filters: 'Іздеу және сүзгі' },
     create: 'Объект құру',
     importCsv: 'CSV импорты',
+    exportExcel: 'Excel жүктеп алу',
+    exportError: 'Тізілімді жүктеу мүмкін болмады',
+    exportFilename: 'ТҮК',
     search: 'Атауы немесе коды бойынша іздеу',
     zoneFilter: 'Аймақ бойынша сүзгі',
     filters: {

@@ -1,8 +1,10 @@
 import { useState } from 'react';
-import { IconPlus } from '@tabler/icons-react';
+import { IconFileSpreadsheet, IconPlus } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useSearchParams } from 'react-router';
+import { buildQuery, downloadFile } from '@/api/client';
 import { useSignals } from '@/api/hooks/signals';
+import { errorMessage } from '@/api/queryClient';
 import type { SignalRow, SignalStatus } from '@/api/types';
 import { useAuth } from '@/auth/useAuth';
 import { dataColumns } from '@/components/dataColumns';
@@ -14,8 +16,10 @@ import { PageHeader } from '@/components/PageHeader';
 import { ZoneBadge } from '@/components/Zone';
 import { ZoneDisclaimer } from '@/components/ZoneDisclaimer';
 import { Button } from '@/components/ui/button';
+import { formatApiDate } from '@/components/form/dates';
 import { useEnum } from '@/i18n/useEnum';
 import { useFormat } from '@/i18n/useFormat';
+import { toast } from '@/lib/toast';
 import { PAGE_SIZE, SIGNAL_STATUSES } from './constants';
 import { CreateSignalModal } from './CreateSignalModal';
 import { DueInfo } from './DueInfo';
@@ -42,6 +46,7 @@ export function SignalsPage() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const [createOpen, setCreateOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const status = parseStatus(params.get('status'));
   // Recipients only see their own cards and cannot browse the registry, so the object filter is not offered to them.
@@ -49,7 +54,22 @@ export function SignalsPage() {
   const pageIndex = (parsePositiveInt(params.get('page')) ?? 1) - 1;
   const hasFilters = status !== undefined || objectId !== undefined;
 
-  const query = useSignals({ status, object_id: objectId, limit: PAGE_SIZE, offset: pageIndex * PAGE_SIZE });
+  const filters = { status, object_id: objectId };
+  const query = useSignals({ ...filters, limit: PAGE_SIZE, offset: pageIndex * PAGE_SIZE });
+
+  const exportExcel = async () => {
+    setExporting(true);
+    try {
+      await downloadFile(
+        `/signals/export.xlsx${buildQuery(filters)}`,
+        `AYQYN_${t('list.exportFilename')}_${formatApiDate(new Date())}.xlsx`,
+      );
+    } catch (error) {
+      toast.error(errorMessage(error), { title: t('list.exportError') });
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const setParam = (changes: Record<string, string | null>) => {
     setParams(
@@ -145,12 +165,18 @@ export function SignalsPage() {
         title={t('list.title')}
         subtitle={subtitle}
         actions={
-          canManageSignals && (
-            <Button className="min-h-11" onClick={() => setCreateOpen(true)}>
-              <IconPlus />
-              {t('list.create')}
+          <>
+            <Button variant="secondary" loading={exporting} onClick={() => void exportExcel()}>
+              <IconFileSpreadsheet />
+              {t('list.exportExcel')}
             </Button>
-          )
+            {canManageSignals && (
+              <Button className="min-h-11" onClick={() => setCreateOpen(true)}>
+                <IconPlus />
+                {t('list.create')}
+              </Button>
+            )}
+          </>
         }
       />
       <div className="grid min-w-0 items-start gap-6 xl:grid-cols-[17rem_minmax(0,1fr)]">

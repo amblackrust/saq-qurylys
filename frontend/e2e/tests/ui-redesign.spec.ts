@@ -359,11 +359,14 @@ interface MockState {
   evidenceContents?: Record<number, { contentType: string; body: string | Buffer }>;
   evidenceFailures?: Record<number, number>;
   expectedEvidence503Responses: number;
+  expectedExport413Responses: number;
   signal: SignalDetail;
   ad: AdDetail;
   object: ObjectDetail;
   ads: AdDetail[];
   failReturnedCount?: number;
+  exportFailurePaths?: string[];
+  exportDelayMs?: number;
   /** `/assistant/config` answers 404 when false (the module is off) */
   assistantEnabled?: boolean;
   /** SSE bodies of the next `/assistant/chat` requests, in order; the default reply afterwards */
@@ -388,6 +391,7 @@ interface Harness {
   mutations: CapturedMutation[];
   unexpected: string[];
   listRequests: URL[];
+  objectListRequests: URL[];
   assignmentRequests: URL[];
   searchQueries: string[];
   downloadRequests: Array<{ url: URL; authorization: string | null }>;
@@ -410,6 +414,7 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
     signals: [],
     assignments: [],
     expectedEvidence503Responses: 0,
+    expectedExport413Responses: 0,
     signal: makeSignal(),
     ad: structuredClone(adFixture),
     object: makeObject(),
@@ -421,6 +426,7 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
     mutations: [],
     unexpected: [],
     listRequests: [],
+    objectListRequests: [],
     assignmentRequests: [],
     searchQueries: [],
     downloadRequests: [],
@@ -497,6 +503,18 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
       harness.downloadRequests.push({ url, authorization: request.headers()['authorization'] ?? null });
       return route.fulfill({ status: 200, contentType: 'application/pdf', body: Buffer.from('%PDF-1.4\n% report fixture\n', 'utf8') });
     }
+    if (method === 'GET' && (path === '/objects/export.xlsx' || path === '/signals/export.xlsx')) {
+      harness.downloadRequests.push({ url, authorization: request.headers()['authorization'] ?? null });
+      if (state.exportDelayMs) await new Promise((resolve) => setTimeout(resolve, state.exportDelayMs));
+      if (state.exportFailurePaths?.includes(path)) {
+        return json(route, { detail: { code: 'too_many_export_rows', message: 'Export exceeds the 10,000-row limit' } }, 413);
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        body: Buffer.from('mock xlsx workbook'),
+      });
+    }
     if (method === 'GET' && path === '/graph') return json(route, state.graph ?? graphFixture);
     if (method === 'GET' && path === '/search') {
       harness.searchQueries.push(url.searchParams.get('q') ?? '');
@@ -518,6 +536,10 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
         (state.role !== 'law_enforcement' || signal.recipient === 'law_enforcement'),
       );
       return json(route, { items: rows, total: rows.length });
+    }
+    if (method === 'GET' && path === '/objects') {
+      harness.objectListRequests.push(url);
+      return json(route, { items: [objectRow, { ...objectRow, id: 8, code: 'D-08', name: 'ЖК Малахит' }], total: 2 });
     }
     if (method === 'GET' && path === '/signals/42') return json(route, state.signal);
     if (method === 'GET' && path === '/signals/88') return json(route, state.signal);
@@ -593,9 +615,6 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
       }
       const content = state.evidenceContents?.[id];
       if (content) return route.fulfill({ status: 200, contentType: content.contentType, body: content.body });
-    }
-    if (method === 'GET' && path === '/objects') {
-      return json(route, { items: [objectRow, { ...objectRow, id: 8, code: 'D-08', name: 'ЖК Малахит' }], total: 2 });
     }
     if (method === 'GET' && path === '/ads') {
       return json(route, { items: state.ads, total: state.ads.length });
@@ -696,8 +715,13 @@ function expectCleanBrowser(harness: Harness) {
     message === 'Failed to load resource: the server responded with a status of 503 (Service Unavailable)',
   );
   expect(fixture503ConsoleErrors.length).toBeLessThanOrEqual(harness.state.expectedEvidence503Responses);
+  const fixture413ConsoleErrors = harness.consoleErrors.filter((message) =>
+    message === 'Failed to load resource: the server responded with a status of 413 (Payload Too Large)',
+  );
+  expect(fixture413ConsoleErrors.length).toBeLessThanOrEqual(harness.state.expectedExport413Responses);
   expect(harness.consoleErrors.filter((message) =>
-    message !== 'Failed to load resource: the server responded with a status of 503 (Service Unavailable)',
+    message !== 'Failed to load resource: the server responded with a status of 503 (Service Unavailable)' &&
+    message !== 'Failed to load resource: the server responded with a status of 413 (Payload Too Large)',
   )).toEqual([]);
   const unexplainedFailures = harness.failedApiRequests.filter((failure) => {
     const evidenceId = /\/api\/v1\/evidence\/(\d+)\/content(?:\?|$)/.exec(failure.url)?.[1];
@@ -1993,6 +2017,114 @@ test('recipients are redirected away from registry assignment control', async ({
   await expect(page.getByRole('link', { name: 'На контроле' })).toHaveCount(0);
   expect(harness.unexpected).toEqual([]);
   expect(harness.pageErrors).toEqual([]);
+});
+
+test('object register exports its complete filtered query and fits the mobile header', async ({ page }) => {
+  const harness = await installMocks(page, 'mio_officer', { exportDelayMs: 200 });
+  await page.goto('/objects?zone=red&territory=11&district=110&q=North&page=4');
+
+  const exportButton = page.getByRole('button', { name: 'Скачать Excel' });
+  await expect(exportButton).toBeVisible();
+  await expect.poll(() => harness.objectListRequests.length).toBeGreaterThan(0);
+  const listRequest = harness.objectListRequests.at(-1)!;
+  expect(listRequest.searchParams.get('zone')).toBe('red');
+  expect(listRequest.searchParams.get('territory_id')).toBe('11');
+  expect(listRequest.searchParams.get('district_id')).toBe('110');
+  expect(listRequest.searchParams.get('q')).toBe('North');
+  expect(listRequest.searchParams.get('limit')).toBe('25');
+  expect(listRequest.searchParams.get('offset')).toBe('75');
+
+  const responsePromise = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/objects/export.xlsx');
+  const downloadPromise = page.waitForEvent('download');
+  await exportButton.click();
+  await expect(exportButton).toHaveAttribute('aria-busy', 'true');
+  const response = await responsePromise;
+  expect(response.headers()['content-type']).toContain('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/^AYQYN_ЖК_\d{4}-\d{2}-\d{2}\.xlsx$/);
+  const exportRequest = harness.downloadRequests.find(({ url }) => url.pathname === '/api/v1/objects/export.xlsx');
+  expect(exportRequest?.authorization).toBe('Bearer mock-ui-session');
+  expect(exportRequest?.url.searchParams.get('zone')).toBe('red');
+  expect(exportRequest?.url.searchParams.get('territory_id')).toBe('11');
+  expect(exportRequest?.url.searchParams.get('district_id')).toBe('110');
+  expect(exportRequest?.url.searchParams.get('q')).toBe('North');
+  expect(exportRequest?.url.searchParams.has('limit')).toBe(false);
+  expect(exportRequest?.url.searchParams.has('offset')).toBe(false);
+
+  await page.setViewportSize({ width: 320, height: 844 });
+  await expect(exportButton).toBeVisible();
+  const buttonBox = await exportButton.boundingBox();
+  expect(buttonBox).not.toBeNull();
+  expect(buttonBox!.x).toBeGreaterThanOrEqual(0);
+  expect(buttonBox!.x + buttonBox!.width).toBeLessThanOrEqual(320);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+  await screenshot(page, 'objects-export-mobile-320');
+  expectCleanBrowser(harness);
+});
+
+test('signal workbook follows list filters, surfaces export limits, and is localized', async ({ page }) => {
+  const harness = await installMocks(page, 'mio_officer', {
+    exportDelayMs: 200,
+    exportFailurePaths: ['/signals/export.xlsx'],
+    expectedExport413Responses: 1,
+  });
+  await page.goto('/signals?status=responded&object_id=7&page=4');
+
+  const exportButton = page.getByRole('button', { name: 'Скачать Excel' });
+  await expect(exportButton).toBeVisible();
+  await expect.poll(() => harness.listRequests.some((url) =>
+    url.searchParams.get('status') === 'responded' &&
+    url.searchParams.get('object_id') === '7' &&
+    url.searchParams.get('offset') === '75',
+  )).toBe(true);
+
+  await exportButton.click();
+  await expect(exportButton).toHaveAttribute('aria-busy', 'true');
+  await expect(page.getByText('Не удалось скачать карточки')).toBeVisible();
+  await expect(page.getByText('Export exceeds the 10,000-row limit')).toBeVisible();
+  const failedExport = harness.downloadRequests.find(({ url }) => url.pathname === '/api/v1/signals/export.xlsx');
+  expect(failedExport?.authorization).toBe('Bearer mock-ui-session');
+  expect(failedExport?.url.searchParams.get('status')).toBe('responded');
+  expect(failedExport?.url.searchParams.get('object_id')).toBe('7');
+  expect(failedExport?.url.searchParams.has('limit')).toBe(false);
+  expect(failedExport?.url.searchParams.has('offset')).toBe(false);
+
+  harness.state.exportFailurePaths = [];
+  const responsePromise = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/signals/export.xlsx');
+  const downloadPromise = page.waitForEvent('download');
+  await exportButton.click();
+  const response = await responsePromise;
+  expect(response.headers()['content-type']).toContain('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/^AYQYN_Сигналы_\d{4}-\d{2}-\d{2}\.xlsx$/);
+  expect(harness.downloadRequests).toHaveLength(2);
+
+  await page.evaluate(() => localStorage.setItem('saq_lang', 'kk'));
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Excel жүктеп алу' })).toBeVisible();
+  expectCleanBrowser(harness);
+});
+
+test('recipient signal export omits the unavailable object filter and keeps authorization', async ({ page }) => {
+  const harness = await installMocks(page, 'gask', { signals: [makeSignal('sent', 'gask')] });
+  await page.goto('/signals?status=sent&object_id=7&page=2');
+
+  const exportButton = page.getByRole('button', { name: 'Скачать Excel' });
+  await expect(exportButton).toBeVisible();
+  await expect.poll(() => harness.listRequests.some((url) =>
+    url.searchParams.get('status') === 'sent' && !url.searchParams.has('object_id'),
+  )).toBe(true);
+  const downloadPromise = page.waitForEvent('download');
+  await exportButton.click();
+  await downloadPromise;
+
+  const exportRequest = harness.downloadRequests.find(({ url }) => url.pathname === '/api/v1/signals/export.xlsx');
+  expect(exportRequest?.authorization).toBe('Bearer mock-ui-session');
+  expect(exportRequest?.url.searchParams.get('status')).toBe('sent');
+  expect(exportRequest?.url.searchParams.has('object_id')).toBe(false);
+  expect(exportRequest?.url.searchParams.has('limit')).toBe(false);
+  expect(exportRequest?.url.searchParams.has('offset')).toBe(false);
+  expectCleanBrowser(harness);
 });
 
 test('work reports and object dossiers download authenticated PDF files', async ({ page }) => {

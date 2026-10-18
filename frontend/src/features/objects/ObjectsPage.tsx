@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { useDebouncedCallback } from '@/lib/hooks';
-import { IconChevronRight, IconPlus, IconSearch, IconUpload } from '@tabler/icons-react';
+import { IconChevronRight, IconFileSpreadsheet, IconPlus, IconSearch, IconUpload } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useSearchParams } from 'react-router';
+import { buildQuery, downloadFile } from '@/api/client';
+import { errorMessage } from '@/api/queryClient';
 import { useObjects } from '@/api/hooks/objects';
 import type { ObjectRow } from '@/api/types';
 import { useAuth } from '@/auth/useAuth';
@@ -12,10 +14,12 @@ import { DemoBadge } from '@/components/DemoBadge';
 import { ErrorBlock } from '@/components/QueryState';
 import { PageHeader } from '@/components/PageHeader';
 import { Button } from '@/components/ui/button';
+import { formatApiDate } from '@/components/form/dates';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { ZoneBadge, ZoneDot } from '@/components/Zone';
 import { ZoneDisclaimer } from '@/components/ZoneDisclaimer';
+import { toast } from '@/lib/toast';
 import { useEnum, useKeyStatusLabel } from '@/i18n/useEnum';
 import { ImportCsvModal } from './forms/ImportCsvModal';
 import { ObjectFormModal } from './forms/ObjectFormModal';
@@ -37,6 +41,7 @@ export function ObjectsPage() {
   const [params, setParams] = useSearchParams();
   const [createOpen, setCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const q = params.get('q') ?? '';
   const zoneParam = params.get('zone');
@@ -62,13 +67,31 @@ export function ObjectsPage() {
   const setFilters = (patch: Record<string, string | null>) =>
     setParams((prev) => patchParams(prev, { ...patch, page: null }));
 
-  const query = useObjects({
+  const filters = {
     zone: zone ?? undefined,
+    territory_id: territoryId ?? undefined,
     district_id: districtId ?? undefined,
     q: q || undefined,
+  };
+  const query = useObjects({
+    ...filters,
     limit: PAGE_SIZE,
     offset: pageIndex * PAGE_SIZE,
   });
+
+  const exportExcel = async () => {
+    setExporting(true);
+    try {
+      await downloadFile(
+        `/objects/export.xlsx${buildQuery(filters)}`,
+        `AYQYN_${t('list.exportFilename')}_${formatApiDate(new Date())}.xlsx`,
+      );
+    } catch (error) {
+      toast.error(errorMessage(error), { title: t('list.exportError') });
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const columns = col.columns([
     col.accessor('code', {
@@ -131,6 +154,10 @@ export function ObjectsPage() {
         actions={
           canEditRegistry && (
             <>
+              <Button variant="secondary" loading={exporting} onClick={() => void exportExcel()}>
+                <IconFileSpreadsheet />
+                {t('list.exportExcel')}
+              </Button>
               <Button variant="secondary" onClick={() => setImportOpen(true)}>
                 <IconUpload />
                 {t('list.importCsv')}

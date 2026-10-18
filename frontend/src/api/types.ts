@@ -481,6 +481,7 @@ export interface ObjectInput {
 
 export interface ObjectListParams {
   zone?: Zone;
+  territory_id?: number;
   district_id?: number;
   q?: string;
   limit?: number;
