@@ -5,6 +5,8 @@ import { Link } from 'react-router';
 import { cn } from '@/lib/utils';
 import type { NavigationEntry } from './model';
 
+const MotionLink = motion.create(Link);
+
 export type NavigationTileMode = 'home' | 'compact' | 'expanded';
 
 interface NavigationTileProps {
@@ -21,7 +23,7 @@ interface NavigationTileProps {
 }
 
 const bentoLayoutTransition = {
-  layout: { type: 'spring' as const, stiffness: 420, damping: 38, mass: 1 },
+  layout: { type: 'tween' as const, duration: 0.68, ease: [0.83, 0, 0.17, 1] as const },
 };
 
 function navigationTone(item: NavigationEntry) {
@@ -79,6 +81,7 @@ export function NavigationTile({
   return (
     <motion.article
       layout
+      layoutDependency={`${mode}:${current}:${expanded}`}
       layoutId={`bento-card-${item.id}`}
       transition={bentoLayoutTransition}
       id={isExpanded ? 'bento-section-panel' : undefined}
@@ -99,7 +102,10 @@ export function NavigationTile({
       )}
       style={{ borderRadius: 'clamp(1.1rem, 1.8vw, 1.7rem)' }}
     >
-      <Link
+      <MotionLink
+        layout
+        layoutDependency={`${mode}:${current}:${expanded}`}
+        transition={bentoLayoutTransition}
         ref={focusRef}
         to={isExpanded ? returnTo : item.to}
         data-testid={testId}
@@ -118,8 +124,17 @@ export function NavigationTile({
         )}
       >
         {tileContents}
-      </Link>
-      {isExpanded && children && <div className="border-t border-border bg-bg px-4 py-4 text-text sm:px-6 sm:py-6">{children}</div>}
+      </MotionLink>
+      {isExpanded && children && (
+        <motion.div
+          layout
+          layoutDependency={`${mode}:${current}:${expanded}`}
+          transition={bentoLayoutTransition}
+          className="min-w-0 border-t border-border bg-bg px-4 py-4 text-text sm:px-6 sm:py-6"
+        >
+          {children}
+        </motion.div>
+      )}
     </motion.article>
   );
 }

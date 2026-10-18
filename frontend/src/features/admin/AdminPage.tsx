@@ -1,4 +1,5 @@
 import type { ComponentType } from 'react';
+import { motion } from 'motion/react';
 import {
   IconChevronRight,
   IconAdjustmentsHorizontal,
@@ -82,7 +83,14 @@ export function AdminPage() {
           })}
         </nav>
         <section className="min-w-0 rounded-2xl border border-border bg-surface p-3 shadow-1 dark:shadow-none sm:p-5" aria-label={t(`sections.${section}`)}>
-          <SectionView />
+          <motion.div
+            key={section}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.16, ease: 'easeOut' }}
+          >
+            <SectionView />
+          </motion.div>
         </section>
       </div>
     </>

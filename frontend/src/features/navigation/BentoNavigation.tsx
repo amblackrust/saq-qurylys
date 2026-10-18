@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useRef, type ReactNode } from 'react';
-import { LayoutGroup, MotionConfig, motion } from 'motion/react';
+import { LayoutGroup, MotionConfig, motion, useReducedMotion } from 'motion/react';
 import { Link, Outlet, useLocation, useNavigationType } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { useVisionEnabled } from '@/api/hooks/vision';
@@ -40,6 +40,7 @@ export function BentoNavigation({ headerUtilities, assistantOpen }: BentoNavigat
   const { canSeeRegistry, canEditRegistry, isAdmin } = useAuth();
   const location = useLocation();
   const navigationType = useNavigationType();
+  const prefersReducedMotion = useReducedMotion();
   const visionEnabled = useVisionEnabled();
   const headerRef = useRef<HTMLElement>(null);
   const sectionLinkRef = useRef<HTMLAnchorElement>(null);
@@ -102,7 +103,14 @@ export function BentoNavigation({ headerUtilities, assistantOpen }: BentoNavigat
           key={navigationKey}
           initial={{ opacity: 0, y: 5 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+          transition={{
+            opacity: {
+              duration: prefersReducedMotion ? 0.12 : 0.42,
+              delay: prefersReducedMotion ? 0 : 0.34,
+              ease: [0.22, 1, 0.36, 1],
+            },
+            y: { duration: prefersReducedMotion ? 0 : 0.42, delay: prefersReducedMotion ? 0 : 0.34, ease: [0.22, 1, 0.36, 1] },
+          }}
         >
           <Outlet context={{ entries, group } satisfies NavigationOutletContext} />
         </motion.div>
