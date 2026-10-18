@@ -25,9 +25,10 @@ interface Props {
   onChange: (patch: Partial<AdFilterValues>) => void;
   onReset: () => void;
   canReset: boolean;
+  hideStatus?: boolean;
 }
 
-export function AdFilters({ values, onChange, onReset, canReset }: Props) {
+export function AdFilters({ values, onChange, onReset, canReset, hideStatus = false }: Props) {
   const { t } = useTranslation('ads');
   const options = useEnumOptions();
   // The input keeps its own text while typing; the URL value is adopted when it changes elsewhere (reset, history).
@@ -44,7 +45,7 @@ export function AdFilters({ values, onChange, onReset, canReset }: Props) {
       className="mb-4 grid grid-cols-1 items-end gap-3 rounded border border-border bg-surface px-4 py-3 sm:grid-cols-2 xl:grid-cols-[repeat(4,minmax(0,1fr))_auto]"
       role="search"
     >
-      <div className="grid grid-cols-1 gap-3 sm:col-span-2 sm:grid-cols-2 xl:col-span-4 xl:grid-cols-4">
+      <div className={`grid grid-cols-1 gap-3 sm:col-span-2 sm:grid-cols-2 ${hideStatus ? 'xl:grid-cols-3' : 'xl:grid-cols-4'} xl:col-span-4`}>
         <SelectInput
           label={t('filters.platform')}
           placeholder={t('filters.platformAll')}
@@ -59,14 +60,16 @@ export function AdFilters({ values, onChange, onReset, canReset }: Props) {
           value={values.objectId}
           onChange={(objectId) => onChange({ objectId })}
         />
-        <SelectInput
-          label={t('filters.status')}
-          placeholder={t('filters.statusAll')}
-          data={options('ad_status', AD_STATUSES)}
-          value={values.status}
-          onChange={(value) => onChange({ status: parseAdStatus(value) })}
-          clearable
-        />
+        {!hideStatus && (
+          <SelectInput
+            label={t('filters.status')}
+            placeholder={t('filters.statusAll')}
+            data={options('ad_status', AD_STATUSES)}
+            value={values.status}
+            onChange={(value) => onChange({ status: parseAdStatus(value) })}
+            clearable
+          />
+        )}
         <TextInput
           label={t('filters.search')}
           placeholder={t('filters.searchPlaceholder')}

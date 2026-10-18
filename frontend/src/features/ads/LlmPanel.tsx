@@ -52,10 +52,13 @@ export function LlmPanel({ ad, extraction, editable }: Props) {
   const readiness = extraction.claimed_readiness_pct;
 
   return (
-    <section
-      className="flex flex-col gap-2.5 rounded border border-zone-yellow/50 bg-zone-yellow-bg px-3.5 py-3 text-sm"
-      aria-label={t('llm.badge')}
-    >
+    <details className="rounded border border-zone-yellow/50 bg-zone-yellow-bg px-3.5 py-3 text-sm">
+      <summary className="flex cursor-pointer list-none flex-wrap items-center gap-x-2.5 gap-y-1 font-medium max-sm:min-h-11">
+        <IconSparkles aria-hidden className="size-4" />
+        <span>{t('llm.badge')}</span>
+        <span className="text-text-2">{t('llm.note')}</span>
+      </summary>
+      <section className="mt-3 flex flex-col gap-2.5" aria-label={t('llm.badge')}>
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
         <Chip tone="yellow" outline>
           {t('llm.badge')}
@@ -135,6 +138,7 @@ export function LlmPanel({ ad, extraction, editable }: Props) {
           )}
         </div>
       )}
-    </section>
+      </section>
+    </details>
   );
 }

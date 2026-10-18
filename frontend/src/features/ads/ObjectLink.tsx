@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router';
+import { Link, useLocation } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { useUpdateAd } from '@/api/hooks/ads';
 import { useSettings } from '@/api/hooks/reference';
@@ -23,6 +23,7 @@ export function ObjectLink({ ad, linked, editable }: Props) {
   const { t } = useTranslation('ads');
   const e = useEnum();
   const { data: settings } = useSettings();
+  const location = useLocation();
   const updateAd = useUpdateAd();
   const [opened, setOpened] = useState(false);
   const [draft, setDraft] = useState<number | null>(null);
@@ -31,6 +32,12 @@ export function ObjectLink({ ad, linked, editable }: Props) {
   const target =
     linked ?? (ad.object_id !== null ? { id: ad.object_id, code: null, name: ad.object_name ?? '' } : null);
   const targetId = target?.id ?? null;
+  const returnParams = new URLSearchParams(location.search);
+  returnParams.set('ad', String(ad.id));
+  const returnTo = `/ads?${returnParams.toString()}`;
+  const objectHref = target
+    ? `/objects/${target.id}?from_ad=${ad.id}&returnTo=${encodeURIComponent(returnTo)}#ads`
+    : null;
 
   const rawThreshold = settings?.link_confidence_threshold;
   const threshold = typeof rawThreshold === 'number' ? rawThreshold : DEFAULT_LINK_THRESHOLD;
@@ -52,7 +59,7 @@ export function ObjectLink({ ad, linked, editable }: Props) {
 
   return (
     <div className="flex min-w-0 flex-col gap-1 text-sm">
-      <span className="text-xs font-medium text-text-3">{t('link.label')}</span>
+      <span id="ad-link" tabIndex={-1} className="text-xs font-medium text-text-3">{target ? t('link.proposalQuestion', { name: target.name }) : t('link.label')}</span>
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
         {target ? (
           <span className="font-semibold [overflow-wrap:anywhere]">
@@ -97,13 +104,14 @@ export function ObjectLink({ ad, linked, editable }: Props) {
             {t('link.confirm')}
           </Button>
         )}
-        {target && (
+        {target && objectHref && (
           <Button className="max-sm:min-h-11" size="sm" asChild>
-            <Link to={`/objects/${target.id}`}>{t('link.checkObject')}</Link>
+            <Link to={objectHref}>{t('link.checkObject')}</Link>
           </Button>
         )}
       </div>
       {!target && <p className="m-0 text-sm text-text-2">{t(editable ? 'link.unlinkedHint' : 'link.unlinkedReadOnlyHint')}</p>}
+      {target && !needsConfirmation && <p className="m-0 text-sm text-zone-green-ink" role="status">{t('link.confirmedSystem')}</p>}
       {feedback && (
         <p className="m-0 text-sm text-zone-green-ink" role="status">
           {t(feedback === 'saved' ? 'link.savedFeedback' : 'link.confirmedFeedback')}

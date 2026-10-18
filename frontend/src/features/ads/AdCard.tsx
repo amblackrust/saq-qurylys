@@ -1,8 +1,9 @@
 import { IconAlertTriangle, IconCheck, IconExternalLink, IconMapPin } from '@tabler/icons-react';
 import { Link } from 'react-router';
 import { useTranslation } from 'react-i18next';
+import type { ReactNode } from 'react';
 import { useAd } from '@/api/hooks/ads';
-import type { AdRow, AdStatus } from '@/api/types';
+import type { AdQueueReason, AdRow, AdStatus } from '@/api/types';
 import { useAuth } from '@/auth/useAuth';
 import { Chip, type ChipTone } from '@/components/Chip';
 import { DemoBadge } from '@/components/DemoBadge';
@@ -38,9 +39,11 @@ interface Props {
   highlighted?: boolean;
   /** the phrase hit the risk-factor evidence points to (`?hit=`) */
   focusHitId?: number | null;
+  showReviewTasks?: boolean;
+  reviewPanel?: ReactNode;
 }
 
-export function AdCard({ ad, highlighted = false, focusHitId = null }: Props) {
+export function AdCard({ ad, highlighted = false, focusHitId = null, showReviewTasks = false, reviewPanel }: Props) {
   const { t } = useTranslation('ads');
   const e = useEnum();
   const f = useFormat();
@@ -100,6 +103,26 @@ export function AdCard({ ad, highlighted = false, focusHitId = null }: Props) {
         </span>
       </div>
 
+      {showReviewTasks && view.queue_reasons.length > 0 && (
+        <div className="flex min-w-0 flex-col gap-1.5 rounded border border-zone-yellow/40 bg-zone-yellow-bg px-3 py-2" aria-label={t('review.queueReasons')}>
+          <strong className="text-sm">{t('review.queueReasons')}</strong>
+          <ul className="m-0 flex list-none flex-col gap-1 p-0 text-sm">
+            {view.queue_reasons.map((reason: AdQueueReason) => {
+              const target = reason.includes('capture') ? '#ad-capture' : reason.includes('ocr') ? '#ad-ocr' : reason.includes('llm') ? '#ad-llm' : reason === 'uncertain_object' ? '#ad-link' : reason === 'unreviewed_phrase_hits' ? '#ad-hits' : '#ad-text';
+              return (
+                <li key={reason}>
+                  <a className="text-link hover:underline" href={target} onClick={(event) => {
+                    event.preventDefault();
+                    document.querySelector(target)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    document.querySelector<HTMLElement>(target)?.focus({ preventScroll: true });
+                  }}>{t(`review.reasons.${reason}`)}</a>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
       {detail?.vision_source && (
         <Link to={`/vision/${detail.vision_source.session_id}`} className="text-sm font-semibold text-link hover:underline">
           {t('card.visionSource')}
@@ -119,7 +142,7 @@ export function AdCard({ ad, highlighted = false, focusHitId = null }: Props) {
               <span className="min-w-0 truncate">{url}</span>
             ))}
           {view.capture_status === 'pending' && (
-            <span className="inline-flex items-center gap-1.5 text-sm text-text-2" role="status">
+            <span id="ad-capture" tabIndex={-1} className="inline-flex items-center gap-1.5 text-sm text-text-2" role="status">
               <Spinner className="size-3.5" />
               {e('capture_status', 'pending')}
             </span>
@@ -127,13 +150,15 @@ export function AdCard({ ad, highlighted = false, focusHitId = null }: Props) {
           {view.capture_status === 'done' && (
             <span className="inline-flex items-center gap-1.5 text-sm text-text-3">
               <IconCheck className="size-3.5" aria-hidden />
-              {e('capture_status', 'done')}
+              {t('card.copySaved')}
             </span>
           )}
         </div>
       )}
       {view.capture_status === 'failed' && (
         <div
+          id="ad-capture"
+          tabIndex={-1}
           className="flex items-start gap-2 rounded border border-zone-red/40 bg-zone-red-bg px-2.5 py-2 text-sm text-zone-red-ink [overflow-wrap:anywhere]"
           role="alert"
         >
@@ -151,7 +176,7 @@ export function AdCard({ ad, highlighted = false, focusHitId = null }: Props) {
         </div>
       )}
 
-      <div className={sectionClass}>
+      <div id="ad-text" tabIndex={-1} className={sectionClass}>
         <strong className="text-sm">{t('card.publicationText')}</strong>
         {view.text ? (
           <HighlightedText text={view.text} hits={detail?.phrase_hits ?? []} focusHitId={focusHitId} />
@@ -159,7 +184,7 @@ export function AdCard({ ad, highlighted = false, focusHitId = null }: Props) {
           <p className="text-text-3">{t('card.noText')}</p>
         )}
         {(view.ocr_status === 'pending' || view.ocr_status === 'failed') && (
-          <div className={chipsClass}>
+          <div id="ad-ocr" tabIndex={-1} className={chipsClass}>
             {view.ocr_status === 'pending' ? (
               <span className="inline-flex items-center gap-1.5 text-sm text-text-2" role="status">
                 <Spinner className="size-3.5" />
@@ -186,17 +211,33 @@ export function AdCard({ ad, highlighted = false, focusHitId = null }: Props) {
           </div>
         )}
         {detail && detail.phrase_hits.length > 0 && (
-          <PhraseHitList adId={ad.id} hits={detail.phrase_hits} editable={canEditRegistry} focusHitId={focusHitId} />
+          <div id="ad-hits" tabIndex={-1}>
+            <p className="mb-1 text-sm font-medium text-text-2">{t('hits.pendingCount', { count: detail.phrase_hits.filter((hit) => hit.confirmed === null).length })}</p>
+            <PhraseHitList adId={ad.id} hits={detail.phrase_hits} editable={canEditRegistry} focusHitId={focusHitId} />
+          </div>
         )}
       </div>
 
-      <LlmPanel ad={view} extraction={detail?.llm_extraction ?? null} editable={canEditRegistry} />
+      {detail && detail.evidence.length > 0 && (
+        <div className={sectionClass}>
+          <span className={labelClass}>{t('card.evidence')}</span>
+          <EvidenceThumbs evidence={detail.evidence} size={88} />
+        </div>
+      )}
+
+      {reviewPanel}
+
+      <div id="ad-llm" tabIndex={-1}>
+        <LlmPanel ad={view} extraction={detail?.llm_extraction ?? null} editable={canEditRegistry} />
+      </div>
 
       <div className={sectionClass}>
         <ObjectLink ad={view} linked={detail?.linked_object ?? null} editable={canEditRegistry} />
       </div>
 
-      <div className={sectionClass}>
+      <details className={sectionClass}>
+        <summary className="cursor-pointer text-sm font-medium max-sm:min-h-11">{t('card.additionalDetails')}</summary>
+        <div className="flex min-w-0 flex-col gap-3 pt-2">
         {view.phones.length > 0 && (
           <div className={factClass}>
             <span className={labelClass}>{t('card.phones')}</span>
@@ -227,14 +268,8 @@ export function AdCard({ ad, highlighted = false, focusHitId = null }: Props) {
             </div>
           </div>
         )}
-      </div>
-
-      {detail && detail.evidence.length > 0 && (
-        <div className={sectionClass}>
-          <span className={labelClass}>{t('card.evidence')}</span>
-          <EvidenceThumbs evidence={detail.evidence} size={88} />
         </div>
-      )}
+      </details>
 
       {detail && <AdVersionsPanel ad={detail} />}
     </article>

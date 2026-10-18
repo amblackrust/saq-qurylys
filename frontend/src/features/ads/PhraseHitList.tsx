@@ -72,7 +72,7 @@ export function PhraseHitList({ adId, hits, editable, focusHitId = null }: Props
                     confirmHit.mutate({ adId, hitId: hit.id, confirmed: true }, { onSuccess: () => setUpdated({ hitId: hit.id, confirmed: true }) })
                   }
                 >
-                  {hypothesis ? t('hits.accept') : t('confirm', { ns: 'common' })}
+                  {hypothesis ? t('hits.accept') : t('hits.confirmDictionary')}
                 </Button>
                 <Button
                   size="sm"
