@@ -40,6 +40,7 @@ interface RouteItem {
   label: string;
   icon: ReactNode;
   end?: boolean;
+  adsView?: 'queue' | 'archive';
 }
 
 const itemClass = ({ isActive }: { isActive: boolean }) =>
@@ -50,12 +51,35 @@ const itemClass = ({ isActive }: { isActive: boolean }) =>
   );
 
 function RouteLink({ item, onNavigate }: { item: RouteItem; onNavigate?: () => void }) {
-  return (
-    <NavLink to={item.to} end={item.end} className={itemClass} onClick={onNavigate}>
+  const location = useLocation();
+  const isActiveAdsView = item.adsView
+    ? location.pathname === '/ads' && (new URLSearchParams(location.search).get('queue') === 'true') === (item.adsView === 'queue')
+    : undefined;
+  const contents = (
+    <>
       <span className="grid size-6 shrink-0 place-items-center [&_svg]:size-5" aria-hidden>
         {item.icon}
       </span>
       <span>{item.label}</span>
+    </>
+  );
+
+  if (item.adsView) {
+    return (
+      <Link
+        to={item.to}
+        aria-current={isActiveAdsView ? 'page' : undefined}
+        className={itemClass({ isActive: isActiveAdsView ?? false })}
+        onClick={onNavigate}
+      >
+        {contents}
+      </Link>
+    );
+  }
+
+  return (
+    <NavLink to={item.to} end={item.end} className={itemClass} onClick={onNavigate}>
+      {contents}
     </NavLink>
   );
 }
@@ -107,26 +131,51 @@ export function AppLayout() {
     return () => desktopQuery.removeEventListener('change', closeOnDesktop);
   }, []);
 
-  const flowItems: RouteItem[] = [
-    ...(canSeeRegistry ? [{ to: '/work', label: t('nav.work'), icon: <IconLayoutDashboard /> }] : []),
-    ...(canSeeRegistry ? [{ to: '/ads', label: t('nav.ads'), icon: <IconSpeakerphone /> }] : []),
-    ...(canSeeRegistry ? [{ to: '/objects', label: t('nav.objects'), icon: <IconBuildingSkyscraper /> }] : []),
-    { to: '/signals', label: t('nav.signals'), icon: <IconSend /> },
-  ];
+  const flowItems: RouteItem[] = isAdmin
+    ? [
+        { to: '/work', label: t('nav.adminOverview'), icon: <IconLayoutDashboard /> },
+        { to: '/admin', label: t('nav.admin'), icon: <IconSettings /> },
+      ]
+    : [
+        ...(canSeeRegistry ? [{ to: '/work', label: t('nav.work'), icon: <IconLayoutDashboard /> }] : []),
+        ...(canSeeRegistry ? [{ to: '/ads?queue=true', label: t('nav.ads'), icon: <IconSpeakerphone />, adsView: 'queue' as const }] : []),
+        ...(canSeeRegistry ? [{ to: '/signals', label: t('nav.signals'), icon: <IconSend /> }] : []),
+        ...(canSeeRegistry ? [{ to: '/objects', label: t('nav.objects'), icon: <IconBuildingSkyscraper /> }] : []),
+        ...(!canSeeRegistry ? [{ to: '/signals', label: t('nav.recipientSignals'), icon: <IconSend /> }] : []),
+      ];
+  const dataItems: RouteItem[] = isAdmin
+    ? [
+        { to: '/ads', label: t('nav.adsArchive'), icon: <IconSpeakerphone />, adsView: 'archive' },
+        { to: '/objects', label: t('nav.objects'), icon: <IconBuildingSkyscraper /> },
+        { to: '/signals', label: t('nav.signals'), icon: <IconSend /> },
+      ]
+    : [];
   const exploreItems: RouteItem[] = canSeeRegistry ? [
     { to: '/map', label: t('nav.map'), icon: <IconMap2 /> },
     { to: '/graph', label: t('nav.graph'), icon: <IconChartDots3 /> },
   ] : [];
-  const toolsItems: RouteItem[] = [
-    ...(canEditRegistry ? [{ to: '/control', label: t('nav.control'), icon: <IconUserCheck /> }] : []),
-    ...(canEditRegistry ? [{ to: '/sources', label: t('nav.sources'), icon: <IconRss /> }] : []),
-    ...(canSeeRegistry && visionEnabled ? [{ to: '/vision', label: t('nav.vision'), icon: <IconEye /> }] : []),
-    ...(isAdmin ? [{ to: '/admin', label: t('nav.admin'), icon: <IconSettings /> }] : []),
-  ];
+  const toolsItems: RouteItem[] = isAdmin
+    ? [
+        ...(canEditRegistry ? [{ to: '/control', label: t('nav.control'), icon: <IconUserCheck /> }] : []),
+        { to: '/sources', label: t('nav.sources'), icon: <IconRss /> },
+        { to: '/map', label: t('nav.map'), icon: <IconMap2 /> },
+        { to: '/graph', label: t('nav.graph'), icon: <IconChartDots3 /> },
+        ...(canSeeRegistry && visionEnabled ? [{ to: '/vision', label: t('nav.vision'), icon: <IconEye /> }] : []),
+      ]
+    : [
+        ...(canEditRegistry ? [{ to: '/control', label: t('nav.control'), icon: <IconUserCheck /> }] : []),
+        ...(canSeeRegistry ? [{ to: '/ads', label: t('nav.adsArchive'), icon: <IconSpeakerphone />, adsView: 'archive' as const }] : []),
+        ...(canEditRegistry ? [{ to: '/sources', label: t('nav.sources'), icon: <IconRss /> }] : []),
+        ...(canSeeRegistry && visionEnabled ? [{ to: '/vision', label: t('nav.vision'), icon: <IconEye /> }] : []),
+      ];
 
-  const pageTitle = [...flowItems, ...exploreItems, ...toolsItems].find(({ to }) =>
-    location.pathname === to || location.pathname.startsWith(`${to}/`),
-  )?.label ?? t('appName');
+  const pageTitle = [...flowItems, ...dataItems, ...exploreItems, ...toolsItems].find((item) => {
+    if (item.adsView) {
+      return location.pathname === '/ads' &&
+        (new URLSearchParams(location.search).get('queue') === 'true') === (item.adsView === 'queue');
+    }
+    return location.pathname === item.to || location.pathname.startsWith(`${item.to}/`);
+  })?.label ?? t('appName');
 
   const closeAssistant = () => {
     assistant.setOpen(false);
@@ -144,7 +193,8 @@ export function AppLayout() {
       </Link>
       <nav aria-label={t('header.menu')} className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-3 py-4">
         <RouteGroup title={t('nav.sectionWork')} items={flowItems} onNavigate={onNavigate} />
-        {canSeeRegistry && <RouteGroup title={t('nav.sectionExplore')} items={exploreItems} onNavigate={onNavigate} />}
+        {dataItems.length > 0 && <RouteGroup title={t('nav.sectionData')} items={dataItems} onNavigate={onNavigate} />}
+        {!isAdmin && canSeeRegistry && <RouteGroup title={t('nav.sectionExplore')} items={exploreItems} onNavigate={onNavigate} />}
         <RouteGroup title={t('nav.sectionTools')} items={toolsItems} onNavigate={onNavigate} />
       </nav>
       <div className="flex flex-col gap-2 border-t border-border p-3">

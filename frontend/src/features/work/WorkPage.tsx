@@ -3,12 +3,14 @@ import { IconChevronRight } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 import { useDashboard } from '@/api/hooks/objects';
+import { useAssignments } from '@/api/hooks/assignments';
 import { useSignals } from '@/api/hooks/signals';
 import type { SignalRow, SignalStatus } from '@/api/types';
 import { useAuth } from '@/auth/useAuth';
-import { EmptyState, ErrorBlock, LoadingBlock } from '@/components/QueryState';
+import { ErrorBlock, LoadingBlock } from '@/components/QueryState';
 import { ReportCard } from './ReportCard';
 import { MyAssignments } from './MyAssignments';
+import { AdminOverview } from './AdminOverview';
 
 type QueueStatus = Exclude<SignalStatus, 'closed'>;
 type SignalQuery = ReturnType<typeof useSignals>;
@@ -54,9 +56,15 @@ function SignalLink({ row, language }: { row: SignalRow; language: string }) {
 }
 
 export function WorkPage() {
+  const { isAdmin } = useAuth();
+  return isAdmin ? <AdminOverview /> : <MioWorkPage />;
+}
+
+function MioWorkPage() {
   const { t, i18n } = useTranslation();
-  const { isAdmin, canEditRegistry } = useAuth();
+  const { canEditRegistry } = useAuth();
   const [requestedStatus, setRequestedStatus] = useState<QueueStatus | null>(null);
+  const assignments = useAssignments({ mine: true, status: 'open', limit: 5 });
   const returned = useSignals({ status: 'returned', limit: 3 });
   const requiresConfirmation = useSignals({ status: 'requires_confirmation', limit: 3 });
   const responded = useSignals({ status: 'responded', limit: 3 });
@@ -75,33 +83,41 @@ export function WorkPage() {
     { status: 'sent', title: t('work.queueSent'), actionLabel: 'work.primarySent', query: sent },
   ];
   const failedQueues = queues.filter(({ query }) => query.isError);
-  const loadingQueues = queues.some(({ query }) => query.isPending);
+  const loadingQueues = queues.some(({ query }) => query.isPending || query.isFetching);
+  const visibleQueues = queues.filter(
+    ({ query }) => query.isPending || query.isFetching || query.isError || (query.data?.total ?? 0) > 0,
+  );
   const allQueuesEmpty =
     !loadingQueues &&
     failedQueues.length === 0 &&
     queues.every(({ query }) => query.data?.total === 0);
   const primaryQueue =
-    !loadingQueues && failedQueues.length === 0
-      ? queues.find(({ status, query }) => status !== 'sent' && (query.data?.total ?? 0) > 0) ??
-        queues.find(({ status, query }) => status === 'sent' && (query.data?.total ?? 0) > 0)
-      : undefined;
+    queues.find(({ status, query }) => !query.isError && (status === 'returned' || status === 'responded') && (query.data?.total ?? 0) > 0) ??
+    queues.find(({ status, query }) => !query.isError && status === 'requires_confirmation' && (query.data?.total ?? 0) > 0) ??
+    queues.find(({ status, query }) => !query.isError && status === 'sent' && (query.data?.total ?? 0) > 0);
   const selectedQueue =
-    queues.find(({ status }) => status === requestedStatus) ?? primaryQueue ?? queues[0];
+    visibleQueues.find(({ status }) => status === requestedStatus) ??
+    (primaryQueue && visibleQueues.find(({ status }) => status === primaryQueue.status)) ??
+    visibleQueues[0];
   const primarySignal =
     primaryQueue?.status === 'sent'
       ? primaryQueue.query.data?.items.find((row) => row.recipient === 'mio') ?? primaryQueue.query.data?.items[0]
       : primaryQueue?.query.data?.items[0];
-  const primaryHref = isAdmin
-    ? '/signals'
+  const availableAssignments = assignments.isError ? undefined : assignments.data?.items;
+  const overdueAssignment = availableAssignments?.find((item) => item.is_overdue);
+  const primaryHref = overdueAssignment
+    ? `/objects/${overdueAssignment.object.id}?assignment=${overdueAssignment.id}#assignments`
     : primaryQueue
       ? primarySignal
         ? `/signals/${primarySignal.id}`
         : `/signals?status=${primaryQueue.status}`
-      : allQueuesEmpty
-        ? '/ads'
+      : availableAssignments?.[0]
+        ? `/objects/${availableAssignments[0].object.id}?assignment=${availableAssignments[0].id}#assignments`
+        : allQueuesEmpty && !assignments.isPending && !assignments.isError
+        ? '/ads?queue=true'
         : undefined;
-  const primaryLabel = isAdmin
-    ? t('work.openCards')
+  const primaryLabel = overdueAssignment
+    ? t('work.primaryAssignment', { object: overdueAssignment.object.name })
     : primaryQueue
       ? primarySignal
         ? t(
@@ -111,7 +127,9 @@ export function WorkPage() {
             { number: primarySignal.number },
           )
         : t('work.openAll')
-      : allQueuesEmpty
+      : availableAssignments?.[0]
+        ? t('work.primaryAssignment', { object: availableAssignments[0].object.name })
+        : allQueuesEmpty && !assignments.isPending && !assignments.isError
         ? t('work.checkAds')
         : undefined;
   const redObjects = dashboard.data?.objects.filter((object) => object.zone === 'red').slice(0, 3) ?? [];
@@ -120,11 +138,10 @@ export function WorkPage() {
     <div className="space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div className="max-w-3xl space-y-1.5">
-          <h1>{isAdmin ? t('work.adminTitle') : t('work.title')}</h1>
+          <h1>{t('work.title')}</h1>
           <p className="m-0 max-w-2xl text-base leading-6 text-text-2">
-            {isAdmin ? t('work.adminIntro') : t('work.intro')}
+            {t('work.intro')}
           </p>
-          {isAdmin && <p className="m-0 text-sm text-text-2">{t('work.adminReadOnly')}</p>}
         </div>
         {primaryHref && primaryLabel && (
           <Link
@@ -134,9 +151,14 @@ export function WorkPage() {
             {primaryLabel}
           </Link>
         )}
+        {primaryHref !== '/ads?queue=true' && (
+          <Link to="/ads?queue=true" className="inline-flex min-h-11 items-center text-sm text-link hover:underline">
+            {t('work.adsQueueLink')}
+          </Link>
+        )}
       </header>
 
-      {canEditRegistry && <MyAssignments />}
+      {canEditRegistry && <MyAssignments query={assignments} />}
 
       <div className="space-y-6">
         <section aria-labelledby="work-queues-title" className="min-w-0">
@@ -145,51 +167,59 @@ export function WorkPage() {
               {t('work.queuesTitle')}
             </h2>
           </div>
-          <div className="grid min-w-0 items-start overflow-hidden rounded-xl border border-border bg-surface lg:grid-cols-[16rem_minmax(0,1fr)]">
-            <nav aria-label={t('work.queuesTitle')} className="grid grid-cols-1 gap-2 border-b border-border p-2 sm:grid-cols-2 sm:p-3 lg:grid-cols-1 lg:gap-1 lg:border-r lg:border-b-0">
-              {queues.map(({ status, title, query }) => (
-                <button
-                  key={status}
-                  type="button"
-                  aria-pressed={selectedQueue.status === status}
-                  onClick={() => setRequestedStatus(status)}
-                  className={`flex min-h-12 min-w-0 items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${selectedQueue.status === status ? 'bg-hover text-text' : 'text-text-2'}`}
-                >
-                  <span className="min-w-0 whitespace-normal">{title}</span>
-                  <span className="shrink-0 tabular-nums text-text-3">
-                    {query.data ? query.data.total : query.isError ? '!' : '—'}
-                  </span>
-                </button>
-              ))}
-            </nav>
-            <div className="min-w-0 px-4 sm:px-5" aria-live="polite">
-              {selectedQueue.query.isError ? (
-                <ErrorBlock error={selectedQueue.query.error} onRetry={() => void selectedQueue.query.refetch()} />
-              ) : selectedQueue.query.isPending ? (
-                <LoadingBlock label={t('work.loadingSignals')} />
-              ) : (selectedQueue.query.data?.total ?? 0) === 0 ? (
-                <EmptyState>{t('work.emptyQueue')}</EmptyState>
-              ) : (
-                <>
-                  <ul className="m-0 list-none divide-y divide-border p-0">
-                    {selectedQueue.query.data?.items.map((row) => (
-                      <li key={row.id}>
-                        <SignalLink row={row} language={i18n.resolvedLanguage ?? i18n.language} />
-                      </li>
-                    ))}
-                  </ul>
-                  {(selectedQueue.query.data?.total ?? 0) > (selectedQueue.query.data?.items.length ?? 0) && (
-                    <Link
-                      to={`/signals?status=${selectedQueue.status}`}
-                      className="my-2 inline-flex min-h-11 items-center px-2 text-sm text-link hover:underline"
-                    >
-                      {t('work.openAll')}
-                    </Link>
-                  )}
-                </>
-              )}
+          <p className="mb-3 -mt-1 text-sm text-text-2">{t('work.territorialQueueNote')}</p>
+          {selectedQueue ? (
+            <div className="grid min-w-0 items-start overflow-hidden rounded-xl border border-border bg-surface lg:grid-cols-[16rem_minmax(0,1fr)]">
+              <nav aria-label={t('work.queuesTitle')} className="grid grid-cols-1 gap-2 border-b border-border p-2 sm:grid-cols-2 sm:p-3 lg:grid-cols-1 lg:gap-1 lg:border-r lg:border-b-0">
+                {visibleQueues.map(({ status, title, query }) => (
+                  <button
+                    key={status}
+                    type="button"
+                    aria-pressed={selectedQueue.status === status}
+                    onClick={() => setRequestedStatus(status)}
+                    className={`flex min-h-12 min-w-0 items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${selectedQueue.status === status ? 'bg-hover text-text' : 'text-text-2'}`}
+                  >
+                    <span className="min-w-0 whitespace-normal">{title}</span>
+                    <span className="shrink-0 tabular-nums text-text-3">
+                      {query.data ? query.data.total : query.isError ? '!' : '—'}
+                    </span>
+                  </button>
+                ))}
+              </nav>
+              <div className="min-w-0 px-4 sm:px-5" aria-live="polite">
+                {selectedQueue.query.isError ? (
+                  <ErrorBlock error={selectedQueue.query.error} onRetry={() => void selectedQueue.query.refetch()} />
+                ) : selectedQueue.query.isPending || selectedQueue.query.isFetching ? (
+                  <LoadingBlock label={t('work.loadingSignals')} />
+                ) : (
+                  <>
+                    <ul className="m-0 list-none divide-y divide-border p-0">
+                      {selectedQueue.query.data?.items.map((row) => (
+                        <li key={row.id}>
+                          <SignalLink row={row} language={i18n.resolvedLanguage ?? i18n.language} />
+                        </li>
+                      ))}
+                    </ul>
+                    {(selectedQueue.query.data?.total ?? 0) > (selectedQueue.query.data?.items.length ?? 0) && (
+                      <Link
+                        to={`/signals?status=${selectedQueue.status}`}
+                        className="my-2 inline-flex min-h-11 items-center px-2 text-sm text-link hover:underline"
+                      >
+                        {t('work.openAll')}
+                      </Link>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3">
+              <p className="m-0 text-sm text-text-2">{t('work.emptyQueue')}</p>
+              <Link to="/signals" className="inline-flex min-h-11 items-center text-sm text-link hover:underline">
+                {t('work.openAll')}
+              </Link>
+            </div>
+          )}
         </section>
 
         <section className="min-w-0" aria-labelledby="work-red-objects-title">
@@ -229,7 +259,10 @@ export function WorkPage() {
           </Link>
         </section>
       </div>
-      <ReportCard />
+      <details className="rounded-xl border border-border bg-surface px-4 py-3">
+        <summary className="min-h-11 cursor-pointer py-2 font-medium">{t('work.openReport')}</summary>
+        <div className="pt-3"><ReportCard /></div>
+      </details>
     </div>
   );
 }

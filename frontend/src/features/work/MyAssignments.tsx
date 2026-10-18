@@ -9,10 +9,13 @@ import { useFormat } from '@/i18n/useFormat';
 const SHOWN = 5;
 
 /** Open assignments given to the current user, overdue first. */
-export function MyAssignments() {
+export function MyAssignments({ query }: { query: ReturnType<typeof useAssignments> }) {
   const { t } = useTranslation('assignments');
   const { date } = useFormat();
-  const query = useAssignments({ mine: true, status: 'open', limit: SHOWN });
+
+  if (query.isPending) return <LoadingBlock />;
+  if (query.isError) return <ErrorBlock error={query.error} onRetry={() => void query.refetch()} />;
+  if (query.data?.items.length === 0) return <p className="m-0 text-sm text-text-3" role="status">{t('mine.empty')}</p>;
 
   return (
     <section
@@ -30,31 +33,23 @@ export function MyAssignments() {
           {t('mine.all')}
         </Link>
       </div>
-      {query.isPending ? (
-        <LoadingBlock />
-      ) : query.isError ? (
-        <ErrorBlock error={query.error} onRetry={() => void query.refetch()} />
-      ) : query.data.items.length === 0 ? (
-        <p className="m-0 text-sm text-text-3">{t('mine.empty')}</p>
-      ) : (
-        <ul className="m-0 list-none divide-y divide-border p-0">
-          {query.data.items.map((item) => (
-            <li key={item.id} className="py-3 first:pt-0 last:pb-0">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <Link to={`/objects/${item.object.id}`} className="font-semibold">
-                  {item.object.name}
-                </Link>
-                <AssignmentState assignment={item} />
-                <span className="text-sm text-text-2">
-                  {t('section.due')}: <span className="tabular-nums">{date(item.due_date)}</span>
-                </span>
-              </div>
-              <p className="m-0 mt-1 text-sm [overflow-wrap:anywhere]">{item.task}</p>
-              <AssignmentActions assignment={item} />
-            </li>
-          ))}
-        </ul>
-      )}
+      <ul className="m-0 list-none divide-y divide-border p-0">
+        {query.data.items.map((item) => (
+          <li key={item.id} className="py-3 first:pt-0 last:pb-0">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <Link to={`/objects/${item.object.id}?assignment=${item.id}#assignments`} className="font-semibold">
+                {item.object.name}
+              </Link>
+              <AssignmentState assignment={item} />
+              <span className="text-sm text-text-2">
+                {t('section.due')}: <span className="tabular-nums">{date(item.due_date)}</span>
+              </span>
+            </div>
+            <p className="m-0 mt-1 text-sm [overflow-wrap:anywhere]">{item.task}</p>
+            <AssignmentActions assignment={item} />
+          </li>
+        ))}
+      </ul>
       {query.data && query.data.total > SHOWN && (
         <p className="m-0 mt-2 text-xs text-text-3">{t('mine.more', { shown: SHOWN, total: query.data.total })}</p>
       )}
