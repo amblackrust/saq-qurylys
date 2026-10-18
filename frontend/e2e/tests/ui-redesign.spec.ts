@@ -1,9 +1,10 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { expect, test } from '../support/test';
+import { t, tKk } from '../support/i18n';
 import type { Page, Route } from '@playwright/test';
-import type { ActivityEvent, AdDetail, Assignment, Assignee, EvidenceMeta, LinkGraph, ObjectDetail, ObjectDocument, Role, SearchResults, SignalDetail, SignalMaterials, SignalRecipient, SignalStatus, User, VisionAsset, VisionFinding, VisionFrame, VisionSessionDetail } from '../../src/api/types';
+import type { ActivityEvent, AdDetail, AdReviewState, Assignment, Assignee, EvidenceMeta, LinkGraph, ObjectDetail, ObjectDocument, Role, SearchResults, SignalDetail, SignalMaterials, SignalRecipient, SignalStatus, User, VisionAsset, VisionFinding, VisionFrame, VisionSessionDetail } from '../../src/api/types';
 
-const screenshotDir = '/tmp/saq-macos-ui';
+const screenshotDir = '/tmp/ayqyn-ux-final';
 const objectRow = {
   id: 7,
   code: 'D-07',
@@ -285,6 +286,14 @@ function makeSignalMaterials(signal: SignalDetail = makeSignal()): SignalMateria
 
 const adFixture: AdDetail = {
   id: 11,
+  review_state: 'unreviewed',
+  reviewed_by: null,
+  reviewed_at: null,
+  review_note: null,
+  queue_reasons: ['manual_review'],
+  duplicate_count: 0,
+  duplicate_instances: [],
+  duplicate_instances_truncated: false,
   territory_id: 1,
   source_account_id: null,
   platform: 'instagram',
@@ -332,6 +341,15 @@ const adFixture: AdDetail = {
   },
   linked_object: { id: 7, code: objectRow.code, name: objectRow.name },
 };
+
+function makeReviewAd(id: number, overrides: Partial<AdDetail> = {}): AdDetail {
+  return {
+    ...structuredClone(adFixture),
+    id,
+    url: `https://example.invalid/post/${id}`,
+    ...overrides,
+  };
+}
 
 function makeObject(zone: 'green' | 'yellow' | 'red' = 'yellow', name = objectRow.name): ObjectDetail {
   const score = zone === 'red' ? 72 : zone === 'yellow' ? 42 : 12;
@@ -485,6 +503,7 @@ interface MockState {
   role: Role;
   graph?: LinkGraph;
   signals: SignalDetail[];
+  signalListFailures?: Partial<Record<SignalStatus, { code: string; message: string }>>;
   assignments: Assignment[];
   searchResults?: SearchResults;
   assignees?: Assignee[];
@@ -492,6 +511,7 @@ interface MockState {
   evidenceContents?: Record<number, { contentType: string; body: string | Buffer }>;
   evidenceFailures?: Record<number, number>;
   expectedEvidence503Responses: number;
+  expectedApi503Responses: number;
   expectedExport413Responses: number;
   expectedPackage413Responses: number;
   signal: SignalDetail;
@@ -502,6 +522,9 @@ interface MockState {
   ad: AdDetail;
   object: ObjectDetail;
   ads: AdDetail[];
+  triageFailure?: { state: AdReviewState; code: string; message: string };
+  adListFailure?: { code: string; message: string };
+  assignmentFailureAfterFirst?: { code: string; message: string };
   failReturnedCount?: number;
   exportFailurePaths?: string[];
   exportDelayMs?: number;
@@ -529,6 +552,7 @@ interface Harness {
   mutations: CapturedMutation[];
   unexpected: string[];
   listRequests: URL[];
+  adListRequests: URL[];
   objectListRequests: URL[];
   assignmentRequests: URL[];
   searchQueries: string[];
@@ -553,6 +577,7 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
     signals: [],
     assignments: [],
     expectedEvidence503Responses: 0,
+    expectedApi503Responses: 0,
     expectedExport413Responses: 0,
     expectedPackage413Responses: 0,
     signal: makeSignal(),
@@ -566,6 +591,7 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
     mutations: [],
     unexpected: [],
     listRequests: [],
+    adListRequests: [],
     objectListRequests: [],
     assignmentRequests: [],
     searchQueries: [],
@@ -687,6 +713,12 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
         state.failReturnedCount = (state.failReturnedCount ?? 0) - 1;
         return json(route, { detail: 'temporary fixture failure' }, 503);
       }
+      const requestedStatus = url.searchParams.get('status') as SignalStatus | null;
+      if (requestedStatus && state.signalListFailures?.[requestedStatus]) {
+        state.expectedApi503Responses += 1;
+        const failure = state.signalListFailures[requestedStatus]!;
+        return json(route, { detail: { code: failure.code, message: failure.message } }, 503);
+      }
       const status = url.searchParams.get('status');
       const objectId = Number(url.searchParams.get('object_id')) || null;
       const rows = state.signals.filter((signal) =>
@@ -703,12 +735,26 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
     }
     if (method === 'GET' && path === '/signals/42') return json(route, state.signal);
     if (method === 'GET' && path === '/signals/88') return json(route, state.signal);
+    if (method === 'PATCH' && /^\/signals\/\d+$/.test(path)) {
+      const input = body as Partial<SignalDetail>;
+      state.signal = {
+        ...state.signal,
+        ...input,
+        sections: { ...state.signal.sections, ...input.sections },
+      };
+      state.signals = state.signals.map((signal) => signal.id === state.signal.id ? state.signal : signal);
+      return json(route, state.signal);
+    }
     if (method === 'GET' && /^\/objects\/\d+\/dossier\.pdf$/.test(path)) {
       harness.downloadRequests.push({ url, authorization: request.headers()['authorization'] ?? null });
       return route.fulfill({ status: 200, contentType: 'application/pdf', body: Buffer.from('%PDF-1.4\n% dossier fixture\n', 'utf8') });
     }
     if (method === 'GET' && path === '/assignments') {
       harness.assignmentRequests.push(url);
+      if (state.assignmentFailureAfterFirst && harness.assignmentRequests.length > 1) {
+        state.expectedApi503Responses += 1;
+        return json(route, { detail: state.assignmentFailureAfterFirst }, 503);
+      }
       const mine = url.searchParams.get('mine') === 'true';
       const status = url.searchParams.get('status');
       const overdue = url.searchParams.get('overdue') === 'true';
@@ -777,7 +823,43 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
       if (content) return route.fulfill({ status: 200, contentType: content.contentType, body: content.body });
     }
     if (method === 'GET' && path === '/ads') {
-      return json(route, { items: state.ads, total: state.ads.length });
+      harness.adListRequests.push(url);
+      if (state.adListFailure) {
+        state.expectedApi503Responses += 1;
+        return json(route, { detail: state.adListFailure }, 503);
+      }
+      const duplicateOf = Number(url.searchParams.get('duplicate_of')) || null;
+      const queue = url.searchParams.get('queue') === 'true';
+      const reviewState = url.searchParams.get('review_state');
+      let rows = state.ads;
+      if (duplicateOf !== null) {
+        const source = state.ads.find((ad) => ad.id === duplicateOf);
+        rows = source?.text && source.source_account_id !== null
+          ? state.ads.filter((ad) => ad.id === source.id || (ad.text === source.text && ad.source_account_id === source.source_account_id))
+          : source ? [source] : [];
+      } else {
+        rows = rows.filter((ad) => {
+          if (reviewState !== null) return ad.review_state === reviewState;
+          if (queue) return ad.review_state === 'unreviewed' || (ad.review_state === 'reviewed' && ad.queue_reasons.length > 0);
+          return true;
+        });
+        const platform = url.searchParams.get('platform');
+        const objectId = Number(url.searchParams.get('object_id')) || null;
+        const status = url.searchParams.get('status');
+        const demo = url.searchParams.get('is_demo');
+        const query = (url.searchParams.get('q') ?? '').toLocaleLowerCase();
+        rows = rows.filter((ad) =>
+          (platform === null || ad.platform === platform) &&
+          (objectId === null || ad.object_id === objectId) &&
+          (status === null || queue || ad.status === status) &&
+          (demo === null || ad.is_demo === (demo === 'true')) &&
+          (query === '' || (ad.text ?? '').toLocaleLowerCase().includes(query)),
+        );
+      }
+      const total = rows.length;
+      const offset = Number(url.searchParams.get('offset') ?? 0);
+      const limit = Number(url.searchParams.get('limit') ?? rows.length);
+      return json(route, { items: rows.slice(offset, offset + limit), total });
     }
     if (method === 'GET' && /^\/ads\/\d+$/.test(path)) {
       const id = Number(path.split('/').at(-1));
@@ -825,9 +907,60 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
     }
 
     if (method === 'POST' && /^\/ads\/\d+\/accept-llm$/.test(path)) return json(route, state.ads.find((ad) => ad.id === Number(path.split('/')[2])) ?? state.ad);
+    const adHitConfirm = /^\/ads\/(\d+)\/hits\/(\d+)\/confirm$/.exec(path);
+    if (method === 'POST' && adHitConfirm) {
+      const adId = Number(adHitConfirm[1]);
+      const hitId = Number(adHitConfirm[2]);
+      const confirmed = (body as { confirmed: boolean }).confirmed;
+      const updateHits = (ad: AdDetail) => ({
+        ...ad,
+        phrase_hits: ad.phrase_hits.map((hit) => hit.id === hitId ? { ...hit, confirmed } : hit),
+        queue_reasons: confirmed && ad.queue_reasons.includes('unreviewed_phrase_hits')
+          ? ad.queue_reasons.filter((reason) => reason !== 'unreviewed_phrase_hits')
+          : ad.queue_reasons,
+      });
+      state.ads = state.ads.map((ad) => ad.id === adId ? updateHits(ad) : ad);
+      if (state.ad.id === adId) state.ad = updateHits(state.ad);
+      return json(route, { success: true });
+    }
+    const triageMatch = /^\/ads\/(\d+)\/triage$/.exec(path);
+    if (method === 'PATCH' && triageMatch) {
+      const adId = Number(triageMatch[1]);
+      const input = body as { state: AdReviewState; note?: string };
+      if (state.triageFailure?.state === input.state) {
+        return json(route, { detail: { code: state.triageFailure.code, message: state.triageFailure.message } }, 409);
+      }
+      const updateTriage = (ad: AdDetail): AdDetail => ({
+        ...ad,
+        review_state: input.state,
+        reviewed_by: 1,
+        reviewed_at: '2026-10-17T10:00:00Z',
+        review_note: input.note === undefined ? ad.review_note : input.note,
+        queue_reasons: input.state === 'reviewed' || input.state === 'deferred' || input.state === 'irrelevant'
+          ? []
+          : ad.queue_reasons.length > 0 ? ad.queue_reasons : ['manual_review'],
+      });
+      state.ads = state.ads.map((ad) => ad.id === adId ? updateTriage(ad) : ad);
+      const updated = state.ads.find((ad) => ad.id === adId) ?? state.ad;
+      if (state.ad.id === adId) state.ad = updated;
+      return json(route, updated);
+    }
     if (method === 'PATCH' && /^\/ads\/\d+$/.test(path)) {
-      state.ad = { ...state.ad, ...(body as Partial<AdDetail>) };
-      return json(route, state.ad);
+      const adId = Number(path.split('/')[2]);
+      const patch = body as Partial<AdDetail>;
+      const updateAd = (ad: AdDetail): AdDetail => {
+        const updated = { ...ad, ...patch };
+        if ('object_id' in patch) {
+          const objectId = patch.object_id ?? null;
+          updated.linked_object = objectId === null
+            ? null
+            : { id: objectId, code: objectId === 8 ? 'D-08' : objectRow.code, name: objectId === 8 ? 'ЖК Малахит' : objectRow.name };
+        }
+        return updated;
+      };
+      state.ads = state.ads.map((ad) => ad.id === adId ? updateAd(ad) : ad);
+      if (state.ad.id === adId) state.ad = updateAd(state.ad);
+      return json(route, state.ads.find((ad) => ad.id === adId) ?? state.ad);
     }
     if (method === 'POST' && path === '/signals/42/confirm-and-send') {
       state.signal = { ...state.signal, status: 'sent', sent_at: '2026-10-16T12:00:00Z', sent_by: 1 };
@@ -874,7 +1007,7 @@ function expectCleanBrowser(harness: Harness) {
   const fixture503ConsoleErrors = harness.consoleErrors.filter((message) =>
     message === 'Failed to load resource: the server responded with a status of 503 (Service Unavailable)',
   );
-  expect(fixture503ConsoleErrors.length).toBeLessThanOrEqual(harness.state.expectedEvidence503Responses);
+  expect(fixture503ConsoleErrors.length).toBeLessThanOrEqual(harness.state.expectedEvidence503Responses + harness.state.expectedApi503Responses);
   const fixture413ConsoleErrors = harness.consoleErrors.filter((message) =>
     message === 'Failed to load resource: the server responded with a status of 413 (Payload Too Large)',
   );
@@ -905,13 +1038,29 @@ test('work opens as the operator task queue, links the real next item and suppor
 
   await page.goto('/');
   await expect(page).toHaveURL(/\/work$/);
-  await expect(page.getByRole('main').getByRole('heading', { level: 1, name: 'Задачи' })).toBeVisible();
+  await expect(page.getByRole('main').getByRole('heading', { level: 1, name: t('work.title') })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Доработать карточку SIG-2026-0043' })).toHaveAttribute('href', '/signals/43');
+  const primaryNav = page.getByRole('navigation', { name: t('header.menu') });
+  const adsQueue = page.getByRole('link', { name: t('work.adsQueueLink') });
+  await expect(adsQueue).toHaveAttribute('href', '/ads?queue=true');
   await screenshot(page, 'work-mio-ru');
+  await adsQueue.click();
+  await expect(page).toHaveURL('/ads?queue=true');
+  await expect(page.getByRole('combobox', { name: t('ads:review.stateLabel') })).toBeVisible();
+  await expect(primaryNav.locator('[aria-current="page"]')).toHaveCount(1);
+  await expect(primaryNav.getByRole('link', { name: t('nav.ads') })).toHaveAttribute('aria-current', 'page');
+  await primaryNav.getByRole('link', { name: t('nav.adsArchive') }).click();
+  await expect(page).toHaveURL('/ads');
+  await expect(primaryNav.locator('[aria-current="page"]')).toHaveCount(1);
+  await expect(primaryNav.getByRole('link', { name: t('nav.adsArchive') })).toHaveAttribute('aria-current', 'page');
+  await page.goBack();
+  await expect(page).toHaveURL('/ads?queue=true');
+  await page.goBack();
+  await expect(page).toHaveURL(/\/work$/);
 
   await page.getByText('ҚАЗ', { exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'kk');
-  await expect(page.getByRole('main').getByRole('heading', { level: 1, name: 'Тапсырмалар' })).toBeVisible();
+  await expect(page.getByRole('main').getByRole('heading', { level: 1, name: tKk('work.title') })).toBeVisible();
   await screenshot(page, 'work-mio-kk');
   expect(harness.mutations).toEqual([]);
   expectCleanBrowser(harness);
@@ -921,9 +1070,9 @@ test('administrator opens the read-only task overview and recipient is kept out 
   const adminHarness = await installMocks(page, 'admin', { signals: [makeSignal('requires_confirmation', 'gask')] });
   await page.goto('/');
   await expect(page).toHaveURL(/\/work$/);
-  await expect(page.getByRole('heading', { level: 1, name: 'Рабочий обзор' })).toBeVisible();
-  await expect(page.getByText('Режим просмотра: выполнять действия по карточкам нельзя.')).toBeVisible();
-  const openCards = page.getByRole('link', { name: 'Открыть карточки' });
+  await expect(page.getByRole('main').getByRole('heading', { level: 1, name: t('work.adminTitle') })).toBeVisible();
+  await expect(page.getByText(/Источников публикаций|Сборщики/).first()).toBeVisible();
+  const openCards = page.getByRole('navigation').getByRole('link', { name: t('nav.cards') });
   await expect(openCards).toHaveAttribute('href', '/signals');
   await screenshot(page, 'work-admin-readonly');
   await openCards.click();
@@ -940,10 +1089,86 @@ test('administrator opens the read-only task overview and recipient is kept out 
   await expect(page).toHaveURL(/\/signals$/);
   await page.goto('/work');
   await expect(page).toHaveURL(/\/signals$/);
-  await expect(page.getByRole('heading', { level: 1, name: 'Карточки проверок' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: t('signals:list.title') })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Создать карточку' })).toHaveCount(0);
   expect(recipientHarness.mutations).toEqual([]);
   expectCleanBrowser(recipientHarness);
+});
+
+test('role landings and navigation preserve recipient registry restrictions', async ({ page }) => {
+  for (const role of ['mio_officer', 'admin', 'gask', 'law_enforcement'] as const) {
+    const harness = await installMocks(page, role);
+    await page.goto('/');
+    const recipient = role === 'gask' || role === 'law_enforcement';
+    await expect(page).toHaveURL(recipient ? /\/signals$/ : /\/work$/);
+    const nav = page.getByRole('navigation', { name: t('header.menu') });
+    if (recipient) {
+      await expect(nav.getByRole('link', { name: t('nav.recipientSignals') })).toBeVisible();
+      for (const key of ['ads', 'objects', 'map', 'graph', 'sources', 'admin']) {
+        await expect(nav.getByRole('link', { name: t(`nav.${key}`) })).toHaveCount(0);
+      }
+      for (const path of ['/map', '/objects', '/ads', '/graph', '/sources', '/control', '/admin']) {
+        await page.goto(path);
+        await expect(page).toHaveURL(/\/signals$/);
+      }
+      await expect(page.getByRole('button', { name: t('signals:list.create') })).toHaveCount(0);
+    } else {
+      if (role === 'admin') {
+        await expect(nav.getByRole('link', { name: t('nav.adminOverview') })).toHaveAttribute('href', '/work');
+        await expect(nav.getByRole('link', { name: t('nav.admin') })).toHaveAttribute('href', '/admin');
+        await expect(nav.getByRole('link', { name: t('nav.adsArchive') })).toHaveAttribute('href', '/ads');
+      } else {
+        await expect(nav.getByRole('link', { name: t('nav.work') })).toBeVisible();
+        await expect(nav.getByRole('link', { name: t('nav.ads') })).toHaveAttribute('href', '/ads?queue=true');
+        await expect(nav.getByRole('link', { name: t('nav.adsArchive') })).toHaveAttribute('href', '/ads');
+        await expect(nav.getByRole('link', { name: t('nav.admin') })).toHaveCount(0);
+      }
+    }
+    expect(harness.mutations).toEqual([]);
+    expectCleanBrowser(harness);
+  }
+});
+
+test('operator work distinguishes an unavailable queue from an empty queue', async ({ page }) => {
+  const harness = await installMocks(page, 'mio_officer', {
+    signalListFailures: { returned: { code: 'temporary_failure', message: 'Queue temporarily unavailable' } },
+  });
+  await page.goto('/work');
+  await expect(page.getByRole('alert').filter({ hasText: 'Queue temporarily unavailable' })).toBeVisible();
+  await expect(page.getByText(t('work.emptyQueue'), { exact: true })).toHaveCount(0);
+  const availableQueues = page.getByRole('navigation', { name: t('work.queuesTitle') });
+  await expect(availableQueues.getByRole('button')).toHaveCount(1);
+  await expect(page.getByRole('link', { name: t('work.adsQueueLink') })).toHaveAttribute('href', '/ads?queue=true');
+  expect(harness.adListRequests).toEqual([]);
+  expectCleanBrowser(harness);
+});
+
+test('operator work collapses four empty signal queues into the compact all-caught-up state', async ({ page }) => {
+  const harness = await installMocks(page, 'mio_officer');
+  await page.goto('/work');
+  await expect(page.getByText(t('work.emptyQueue'), { exact: true })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: t('work.queuesTitle') })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: t('work.openAll') })).toHaveAttribute('href', '/signals');
+  await expect(page.getByRole('link', { name: t('work.checkAds') })).toHaveAttribute('href', '/ads?queue=true');
+  expect(harness.listRequests.filter((url) => url.pathname.endsWith('/signals')).length).toBe(4);
+  expectCleanBrowser(harness);
+});
+
+test('operator work does not use a stale assignment as the main action after its refetch fails', async ({ page }) => {
+  const assignment = makeAssignment();
+  const harness = await installMocks(page, 'mio_officer', {
+    assignments: [assignment],
+    assignmentFailureAfterFirst: { code: 'temporary_failure', message: 'Assignments temporarily unavailable' },
+  });
+  await page.goto('/work');
+  const nextTask = t('work.primaryAssignment', { object: assignment.object.name });
+  await expect(page.getByRole('link', { name: nextTask })).toHaveAttribute('href', '/objects/7?assignment=61#assignments');
+  await page.goto('/objects/7');
+  await page.goto('/work');
+  await expect(page.getByRole('alert').filter({ hasText: 'Assignments temporarily unavailable' })).toBeVisible();
+  await expect(page.getByRole('link', { name: nextTask })).toHaveCount(0);
+  await expect.poll(() => harness.assignmentRequests.length).toBeGreaterThan(1);
+  expectCleanBrowser(harness);
 });
 
 test('administrator edits a setting and submits only the changed value', async ({ page }) => {
@@ -1187,7 +1412,19 @@ test('light and dark appearance persists; the sidebar and mobile drawer fit supp
   await expect.poll(() => page.locator('body').evaluate((body) => getComputedStyle(body).overflow)).not.toBe('hidden');
   await page.setViewportSize({ width: 390, height: 844 });
   await menuButton.click();
-  await drawer.getByRole('navigation').getByRole('link', { name: 'Рабочий стол' }).click();
+  const drawerNav = drawer.getByRole('navigation');
+  await expect(drawerNav.locator('[aria-current="page"]')).toHaveCount(1);
+  await drawerNav.getByRole('link', { name: t('nav.ads') }).click();
+  await expect(page).toHaveURL('/ads?queue=true');
+  await menuButton.click();
+  await expect(drawerNav.locator('[aria-current="page"]')).toHaveCount(1);
+  await expect(drawerNav.getByRole('link', { name: t('nav.ads') })).toHaveAttribute('aria-current', 'page');
+  await drawerNav.getByRole('link', { name: t('nav.adsArchive') }).click();
+  await expect(page).toHaveURL('/ads');
+  await menuButton.click();
+  await expect(drawerNav.locator('[aria-current="page"]')).toHaveCount(1);
+  await expect(drawerNav.getByRole('link', { name: t('nav.adsArchive') })).toHaveAttribute('aria-current', 'page');
+  await drawerNav.getByRole('link', { name: t('nav.work') }).click();
   await expect(page).toHaveURL(/\/work$/);
   await expect(drawer).toBeHidden();
 
@@ -1669,7 +1906,9 @@ test('object review reuses an open card, suppresses creation on stale lookup, an
 test('ad review makes AI scope visible, confirms the match and reports object-link changes', async ({ page }) => {
   const harness = await installMocks(page, 'mio_officer');
   await page.goto('/ads?ad=11');
-  await expect(page.getByRole('article', { name: 'Публикация №11' })).toBeVisible();
+  const article = page.getByRole('article', { name: t('ads:card.label', { id: 11 }) });
+  await expect(article).toBeVisible();
+  await article.locator('details').filter({ hasText: t('ads:llm.badge') }).locator('summary').click();
   const aiPanel = page.getByRole('region', { name: 'Подсказки ИИ' });
   await expect(aiPanel).toBeVisible();
   await expect(aiPanel.getByText('Схемы оплаты', { exact: true })).toBeVisible();
@@ -1686,7 +1925,7 @@ test('ad review makes AI scope visible, confirms the match and reports object-li
   await expect.poll(() => harness.mutations.some((item) => item.path === '/ads/11/accept-llm')).toBe(true);
   expect(harness.mutations.filter((item) => item.method === 'POST' && item.path === '/ads/11/accept-llm')).toHaveLength(1);
 
-  await page.getByRole('button', { name: 'Подтвердить связь' }).click();
+  await page.getByRole('button', { name: t('ads:link.confirm') }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Связь подтверждена.' })).toBeVisible();
   const confirmed = harness.mutations.find((item) => item.method === 'PATCH' && item.path === '/ads/11');
   expect(confirmed?.body).toEqual({ status: 'captured' });
@@ -1703,11 +1942,278 @@ test('ad review makes AI scope visible, confirms the match and reports object-li
   expectCleanBrowser(harness);
 });
 
+test('ads review queue keeps server defaults, guards completion, and advances through persisted triage', async ({ page }) => {
+  const first = makeReviewAd(11, {
+    status: 'verification',
+    object_id: 7,
+    linked_object: { id: 7, code: objectRow.code, name: objectRow.name },
+    phrase_hits: [{
+      id: 111, ad_post_id: 11, phrase_id: 1, category: 'booking', matched_text: 'Бронирование квартир', start: 0, end: 20,
+      weight: 2, detected_by: 'dictionary', confirmed: null, confirmed_by: null,
+    }],
+    queue_reasons: ['uncertain_object', 'unreviewed_phrase_hits'],
+  });
+  const second = makeReviewAd(12, {
+    status: 'captured', object_id: null, object_name: null, linked_object: null,
+    review_state: 'unreviewed', queue_reasons: ['manual_review'],
+  });
+  const retry = makeReviewAd(13, {
+    status: 'captured', object_id: null, object_name: null, linked_object: null,
+    review_state: 'reviewed', queue_reasons: ['ocr_pending'], ocr_status: 'pending',
+  });
+  const harness = await installMocks(page, 'mio_officer', { ads: [first, second, retry] });
+
+  await page.goto('/ads?queue=true');
+  await expect(page.getByRole('button', { name: 'Публикация №11' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Публикация №12' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Публикация №13' })).toBeVisible();
+  await expect.poll(() => harness.adListRequests.some((url) => url.searchParams.get('queue') === 'true' && !url.searchParams.has('review_state'))).toBe(true);
+  const reviewedAction = page.getByRole('button', { name: 'Отметить разобранной' });
+  await expect(reviewedAction).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Отметить нерелевантной' })).toBeEnabled();
+  expect(harness.mutations.filter(({ path }) => path.endsWith('/accept-llm'))).toEqual([]);
+
+  await page.getByRole('button', { name: t('ads:hits.confirmDictionary') }).click();
+  await page.getByRole('button', { name: t('ads:link.confirm') }).click();
+  await expect(reviewedAction).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Отметить нерелевантной' })).toBeDisabled();
+  await reviewedAction.click();
+  await expect(page).toHaveURL(/\/ads\?queue=true&ad=11$/);
+  await expect(page.getByText('Состояние проверки сохранено')).toBeVisible();
+  await expect(page.getByRole('article', { name: 'Публикация №11' })).toBeVisible();
+  expect(harness.state.ads.find((ad) => ad.id === 11)?.review_state).toBe('reviewed');
+  expect(harness.state.ads.find((ad) => ad.id === 11)?.queue_reasons).toEqual([]);
+  expect(harness.adListRequests.some((url) => url.searchParams.get('queue') === 'true' && !url.searchParams.has('review_state'))).toBe(true);
+  expect(harness.adListRequests.some((url) => url.searchParams.get('queue') === 'true' && url.searchParams.get('review_state') === 'unreviewed')).toBe(false);
+
+  await page.getByRole('button', { name: t('ads:review.next') }).click();
+  await expect(page).toHaveURL(/\/ads\?queue=true&ad=12$/);
+  await expect(page.getByRole('article', { name: 'Публикация №12' })).toBeVisible();
+  await page.getByLabel('Заметка для команды').fill('Ждём уточнение источника');
+  await page.getByRole('button', { name: 'Отложить' }).click();
+  await expect(page).toHaveURL(/\/ads\?queue=true&ad=12$/);
+  await expect(page.getByText(t('ads:review.result.deferred'))).toBeVisible();
+  expect(harness.state.ads.find((ad) => ad.id === 12)?.review_note).toBe('Ждём уточнение источника');
+  await page.getByRole('button', { name: t('ads:review.next') }).click();
+  await expect(page).toHaveURL(/\/ads\?queue=true&ad=13$/);
+  await expect(page.getByRole('button', { name: 'Публикация №13' })).toBeVisible();
+  await expect(page.getByText('Текст с изображений ещё распознаётся')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Отметить разобранной' })).toBeDisabled();
+
+  const stateSelect = page.getByRole('combobox', { name: 'Состояние проверки' });
+  await stateSelect.click();
+  await page.getByRole('option', { name: 'Отложено' }).click();
+  await expect(page).toHaveURL(/review_state=deferred/);
+  await page.getByRole('button', { name: 'Публикация №12' }).click();
+  await expect(page.getByRole('article', { name: 'Публикация №12' })).toBeVisible();
+  await expect(page.getByLabel('Заметка для команды')).toHaveValue('Ждём уточнение источника');
+  await page.getByRole('button', { name: 'Вернуть на проверку' }).click();
+  await expect(page).toHaveURL(/\/ads\?queue=true&ad=12$/);
+  await expect(page.getByRole('article', { name: 'Публикация №12' })).toBeVisible();
+  expect(harness.state.ads.find((ad) => ad.id === 12)?.review_state).toBe('unreviewed');
+  expect(harness.state.ads.find((ad) => ad.id === 12)?.review_note).toBe('Ждём уточнение источника');
+  expect(harness.mutations.filter(({ method, path }) => method === 'PATCH' && path.endsWith('/triage')).map(({ body }) => body)).toEqual([
+    { state: 'reviewed', note: null },
+    { state: 'deferred', note: 'Ждём уточнение источника' },
+    { state: 'unreviewed', note: 'Ждём уточнение источника' },
+  ]);
+  expect(harness.mutations.filter(({ path }) => path.endsWith('/accept-llm'))).toEqual([]);
+  expect(harness.mutations.some(({ path }) => path.includes('/score') || path.includes('/risk'))).toBe(false);
+  expectCleanBrowser(harness);
+});
+
+test('queue boundary navigation selects the actual previous-page last row and never shows an off-filter ordinal', async ({ page }) => {
+  const ads = Array.from({ length: 21 }, (_, index) => makeReviewAd(index + 1, {
+    review_state: 'unreviewed',
+    queue_reasons: ['manual_review'],
+  }));
+  ads[19]!.phrase_hits = [{
+    id: 120, ad_post_id: 20, phrase_id: 1, category: 'booking', matched_text: 'Бронирование квартир', start: 0, end: 20,
+    weight: 2, detected_by: 'dictionary', confirmed: null, confirmed_by: null,
+  }];
+  ads[19]!.queue_reasons = ['manual_review', 'unreviewed_phrase_hits'];
+  const harness = await installMocks(page, 'mio_officer', { ads });
+  await page.goto('/ads?queue=true&page=2&ad=21');
+  await expect(page.getByRole('article', { name: t('ads:card.label', { id: 21 }) })).toBeVisible();
+  await expect(page.getByText(t('ads:review.progress', { current: 21, total: 21 }))).toBeVisible();
+  await page.getByRole('button', { name: t('ads:review.previous') }).click();
+  await expect(page).toHaveURL('/ads?queue=true&page=1&ad=20');
+  await expect(page.getByRole('article', { name: t('ads:card.label', { id: 20 }) })).toBeVisible();
+  await expect(page.getByText(t('ads:review.progress', { current: 20, total: 21 }))).toBeVisible();
+  await page.getByLabel(t('ads:review.noteLabel')).fill('Сохранить заметку на границе страницы');
+  await page.getByRole('button', { name: t('ads:hits.confirmDictionary') }).click();
+  await expect(page).toHaveURL('/ads?queue=true&page=1&ad=20');
+  await expect(page.getByRole('article', { name: t('ads:card.label', { id: 20 }) })).toBeVisible();
+  await expect(page.getByLabel(t('ads:review.noteLabel'))).toHaveValue('Сохранить заметку на границе страницы');
+  await page.goBack();
+  await expect(page).toHaveURL('/ads?queue=true&page=2&ad=21');
+  await expect(page.getByRole('article', { name: t('ads:card.label', { id: 21 }) })).toBeVisible();
+
+  await page.goto('/ads?queue=true&review_state=reviewed&ad=21');
+  await expect(page.getByRole('article', { name: t('ads:card.label', { id: 21 }) })).toBeVisible();
+  await expect(page.getByText(/Публикация \d+ из \d+/)).toHaveCount(0);
+  expect(harness.adListRequests.some((url) => url.searchParams.get('offset') === '20' && url.searchParams.get('limit') === '20')).toBe(true);
+  expectCleanBrowser(harness);
+});
+
+test('exact duplicate advisories keep all publications visible and open the scoped server group', async ({ page }) => {
+  const sharedText = 'Одинаковый текст объявления из одного источника';
+  const peer = makeReviewAd(12, {
+    text: sharedText, source_account_id: 3,
+    duplicate_count: 1,
+    duplicate_instances: [{ id: 11, url: 'https://example.invalid/post/11', platform: 'instagram', source_label: '@sever_build' }],
+  });
+  const source = makeReviewAd(11, {
+    text: sharedText, source_account_id: 3,
+    duplicate_count: 1,
+    duplicate_instances: [{ id: 12, url: 'https://example.invalid/post/12', platform: 'instagram', source_label: '@sever_build' }],
+  });
+  const harness = await installMocks(page, 'mio_officer', { ads: [source, peer] });
+
+  await page.goto('/ads');
+  await expect(page.getByRole('button', { name: 'Публикация №11' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Публикация №12' })).toBeVisible();
+  await page.locator('details[aria-label]').filter({ hasText: t('ads:review.exactDuplicates') }).locator('summary').click();
+  await page.getByRole('button', { name: t('ads:review.openDuplicateGroup') }).click();
+  await expect(page).toHaveURL(/duplicate_of=11/);
+  await expect(page.getByRole('button', { name: 'Публикация №11' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Публикация №12' })).toBeVisible();
+  await expect.poll(() => harness.adListRequests.some((url) => url.searchParams.get('duplicate_of') === '11' && !url.searchParams.has('queue'))).toBe(true);
+  await expect(page.getByText('Источник: @sever_build').first()).toBeVisible();
+  await page.getByRole('button', { name: 'Вернуться к списку' }).click();
+  await expect(page).toHaveURL('/ads');
+  await expect(page.getByRole('button', { name: 'Публикация №11' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Публикация №12' })).toBeVisible();
+  expect(harness.mutations).toEqual([]);
+  expectCleanBrowser(harness);
+});
+
+test('publication context preserves the demo label and returns to the selected queue item', async ({ page }) => {
+  const demoAd = makeReviewAd(11, { is_demo: true });
+  const harness = await installMocks(page, 'mio_officer', { ads: [demoAd] });
+  await page.goto('/ads?queue=true');
+  await page.getByRole('button', { name: t('ads:card.label', { id: 11 }) }).click();
+  await page.getByRole('link', { name: t('ads:link.checkObject') }).click();
+  await expect(page).toHaveURL(/\/objects\/7\?from_ad=11&returnTo=%2Fads%3Fqueue%3Dtrue%26ad%3D11#ads$/);
+
+  const context = page.locator('#ads');
+  await expect(context).toBeFocused();
+  await expect(context.getByText(t('demo.badge'), { exact: true })).toBeVisible();
+  await expect(context.getByText(demoAd.text!, { exact: true })).toBeVisible();
+  await screenshot(page, 'ads-object-context-demo');
+  await context.getByRole('link', { name: t('objects:card.publication.return') }).click();
+  await expect(page).toHaveURL('/ads?queue=true&ad=11');
+  await expect(page.getByRole('article', { name: t('ads:card.label', { id: 11 }) })).toBeVisible();
+  expect(harness.mutations).toEqual([]);
+  expectCleanBrowser(harness);
+});
+
+test('an assignment URL missing from the object explains the gap and does not focus another task', async ({ page }) => {
+  const assignment = makeAssignment();
+  const harness = await installMocks(page, 'mio_officer', { assignments: [assignment] });
+  await page.goto('/objects/7?assignment=999#assignments');
+  await expect(page.getByText(t('assignments:section.focusUnavailable'), { exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: t('assignments:section.openAll') })).toHaveAttribute('href', '/control');
+  await expect(page.locator('#assignments [aria-current="true"]')).toHaveCount(0);
+  expect(harness.mutations).toEqual([]);
+  expectCleanBrowser(harness);
+});
+
+test('admin sees the signal route summary without MIO recipient navigation actions', async ({ page }) => {
+  const signal = makeSignal('requires_confirmation', 'gask');
+  const harness = await installMocks(page, 'admin', { signal });
+  await page.goto('/signals/42');
+  const routeSummary = t('signals:detail.prepareSummary.readOnly', {
+    recipient: t('enums:recipient.gask'),
+    days: t('signals:reviewDays', { count: signal.review_days }),
+  });
+  await expect(page.getByText(routeSummary, { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: t('signals:detail.prepareSummary.route') })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: t('signals:actions.confirmSend') })).toHaveCount(0);
+  expect(harness.mutations).toEqual([]);
+  expectCleanBrowser(harness);
+});
+
+test('signal filter group headings stay localized for registry and recipient roles', async ({ page }) => {
+  const statusRows = (['requires_confirmation', 'returned', 'responded', 'sent', 'closed'] as SignalStatus[]).map((status, index) => {
+    const signal = makeSignal(status, 'gask');
+    signal.id = 42 + index;
+    signal.number = `SIG-2026-${String(42 + index).padStart(4, '0')}`;
+    return signal;
+  });
+  const harness = await installMocks(page, 'mio_officer', { signals: statusRows });
+  await page.goto('/signals');
+  for (const group of ['action', 'waiting', 'history']) {
+    await expect(page.getByText(t(`signals:list.filters.groups.${group}`), { exact: true })).toBeVisible();
+  }
+  await expect(page.getByText(/list\.filters\.groups\./)).toHaveCount(0);
+  await page.getByText('ҚАЗ', { exact: true }).click();
+  for (const group of ['action', 'waiting', 'history']) {
+    await expect(page.getByText(tKk(`signals:list.filters.groups.${group}`), { exact: true })).toBeVisible();
+  }
+
+  harness.state.role = 'gask';
+  await page.reload();
+  for (const group of ['action', 'answered', 'history']) {
+    await expect(page.getByText(tKk(`signals:list.filters.groups.${group}`), { exact: true })).toBeVisible();
+  }
+  await expect(page.getByText(/list\.filters\.groups\./)).toHaveCount(0);
+  expect(harness.mutations).toEqual([]);
+  expectCleanBrowser(harness);
+});
+
+test('unsaved signal drafts protect Link and browser-back navigation and preserve edits on Stay', async ({ page }) => {
+  const signal = makeSignal('requires_confirmation', 'gask');
+  const harness = await installMocks(page, 'mio_officer', { signal, signals: [signal] });
+  await page.goto('/signals');
+  await page.getByRole('link', { name: signal.number }).click();
+  await expect(page).toHaveURL(/\/signals\/42\?/);
+  const note = page.getByRole('textbox', { name: t('signals:sections.note') });
+  await note.fill('Черновик должен сохраниться при выборе «Остаться»');
+
+  await page.getByRole('link', { name: t('signals:detail.back') }).click();
+  const blocker = page.getByRole('alertdialog', { name: t('signals:unsaved.leaveTitle') });
+  await expect(blocker).toBeVisible();
+  await blocker.getByRole('button', { name: t('signals:unsaved.stay') }).click();
+  await expect(page).toHaveURL(/\/signals\/42\?/);
+  await expect(note).toHaveValue('Черновик должен сохраниться при выборе «Остаться»');
+
+  await page.evaluate(() => window.history.back());
+  await expect(blocker).toBeVisible();
+  await blocker.getByRole('button', { name: t('signals:unsaved.stay') }).click();
+  await expect(page).toHaveURL(/\/signals\/42\?/);
+  await expect(note).toHaveValue('Черновик должен сохраниться при выборе «Остаться»');
+
+  await page.getByRole('navigation', { name: t('header.menu') }).getByRole('link', { name: t('nav.work') }).click();
+  await expect(blocker).toBeVisible();
+  await blocker.getByRole('button', { name: t('signals:unsaved.leave') }).click();
+  await expect(page).toHaveURL(/\/work$/);
+  expect(harness.mutations).toEqual([]);
+  expect(harness.state.signal.sections.note).toBe('');
+  expectCleanBrowser(harness);
+});
+
+test('saving a signal draft clears its navigation blocker', async ({ page }) => {
+  const signal = makeSignal('requires_confirmation', 'gask');
+  const harness = await installMocks(page, 'mio_officer', { signal });
+  await page.goto('/signals/42');
+  await page.getByRole('textbox', { name: t('signals:sections.note') }).fill('Сохранённое примечание');
+  await page.getByRole('button', { name: t('signals:unsaved.save') }).click();
+  await expect(page.getByRole('status').filter({ hasText: t('signals:unsaved.message') })).toHaveCount(0);
+  expect(harness.state.signal.sections.note).toBe('Сохранённое примечание');
+  expect(harness.mutations.filter(({ method, path }) => method === 'PATCH' && path === '/signals/42')).toHaveLength(1);
+  await page.getByRole('navigation', { name: t('header.menu') }).getByRole('link', { name: t('nav.work') }).click();
+  await expect(page).toHaveURL(/\/work$/);
+  await expect(page.getByRole('alertdialog')).toHaveCount(0);
+  expectCleanBrowser(harness);
+});
+
 test('switching from a reviewed ad to another ad keeps the second ad review action available', async ({ page }) => {
   const secondAd = { ...structuredClone(adFixture), id: 12, url: 'https://example.invalid/post/12', status: 'verification' as const };
   const harness = await installMocks(page, 'mio_officer', { ads: [structuredClone(adFixture), secondAd] });
   await page.goto('/ads?ad=11');
   const firstArticle = page.getByRole('article', { name: 'Публикация №11' });
+  await firstArticle.locator('details').filter({ hasText: t('ads:llm.badge') }).locator('summary').click();
   await expect(firstArticle.getByRole('button', { name: 'Подтвердить сведения ИИ' })).toBeVisible();
   await firstArticle.getByRole('button', { name: 'Подтвердить сведения ИИ' }).click();
   await expect(firstArticle.getByRole('status').filter({ hasText: /Сохранено то, что подтверждает текст/ })).toBeVisible();
@@ -1716,6 +2222,7 @@ test('switching from a reviewed ad to another ad keeps the second ad review acti
   await expect(page).toHaveURL(/\/ads\?ad=12$/);
   const secondArticle = page.getByRole('article', { name: 'Публикация №12' });
   await expect(secondArticle).toBeVisible();
+  await secondArticle.locator('details').filter({ hasText: t('ads:llm.badge') }).locator('summary').click();
   await expect(secondArticle.getByRole('button', { name: 'Подтвердить сведения ИИ' })).toBeVisible();
   expect(harness.mutations.filter(({ method, path }) => method === 'POST' && path === '/ads/11/accept-llm')).toHaveLength(1);
   expect(harness.mutations.filter(({ method, path }) => method === 'POST' && path === '/ads/12/accept-llm')).toHaveLength(0);
@@ -1765,6 +2272,19 @@ test('recipient filters stay role-aware; send, answer and close each have explic
   await expect(page.getByRole('heading', { level: 2, name: 'Карточка направлена — ожидаем ответ' })).toBeVisible();
   const sendMutation = harness.mutations.find((item) => item.path === '/signals/42/confirm-and-send');
   expect(sendMutation?.body).toEqual({ recipient: 'gask' });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const sentStatusSummary = page.getByRole('heading', { name: t('signals:detail.waitingSummary.title'), exact: true });
+  const nextStepSummary = page.getByRole('heading', { name: t('signals:detail.next.waitingTitle'), exact: true });
+  await expect(sentStatusSummary).toBeVisible();
+  await expect(nextStepSummary).toBeVisible();
+  const statusBox = await sentStatusSummary.boundingBox();
+  const nextStepBox = await nextStepSummary.boundingBox();
+  expect(statusBox).not.toBeNull();
+  expect(nextStepBox).not.toBeNull();
+  expect(statusBox!.y + statusBox!.height).toBeLessThan(nextStepBox!.y);
+  await screenshot(page, 'signal-sent-status-first-mobile-390');
+  await page.setViewportSize({ width: 1440, height: 900 });
   await screenshot(page, 'signal-sent-next-step');
 
   harness.state.role = 'gask';
@@ -2537,6 +3057,7 @@ test('work reports and object dossiers download authenticated PDF files', async 
     await page.screenshot({ path: `${dir}/${name}.png`, fullPage: true });
   };
 
+  await page.locator('details').filter({ hasText: t('work.openReport') }).locator('summary').click();
   await expect(reportZones).toBeVisible();
   await expect(reportZones).toContainText('Красные и жёлтые');
   await reportScreenshot('report-priority-light-ru');
@@ -2585,6 +3106,7 @@ test('work reports and object dossiers download authenticated PDF files', async 
   await page.keyboard.press('Escape');
   await page.setViewportSize({ width: 320, height: 844 });
   await page.goto('/work');
+  await page.locator('details').filter({ hasText: t('work.openReport') }).locator('summary').click();
   await expect(reportPanel.getByRole('combobox')).toContainText('Красные и жёлтые');
   await reportScreenshot('report-mobile-320-light-ru-priority');
   const mobileReportButton = reportPanel.getByRole('button', { name: /PDF/ });

@@ -17,7 +17,7 @@ for (const [role, label] of [
       await expect(page).toHaveURL(/\/signals$/);
 
       const nav = page.getByRole('navigation', { name: t('header.menu') });
-      await expect(nav.getByRole('link', { name: t('nav.signals') })).toBeVisible();
+      await expect(nav.getByRole('link', { name: t('nav.recipientSignals') })).toBeVisible();
       for (const hidden of ['map', 'objects', 'ads', 'sources', 'graph', 'admin']) {
         await expect(nav.getByRole('link', { name: t(`nav.${hidden}`) })).toHaveCount(0);
       }
@@ -40,7 +40,8 @@ test.describe('registry officer', () => {
 
   test('has the registry sections but not the administration', async ({ page }) => {
     await page.goto('/');
-    await expect(page).toHaveURL(/\/map$/);
+    await expect(page).toHaveURL(/\/work$/);
+    await expect(page.getByRole('main').getByRole('heading', { level: 1, name: t('work.title') })).toBeVisible();
 
     const nav = page.getByRole('navigation', { name: t('header.menu') });
     for (const shown of ['map', 'objects', 'ads', 'graph', 'signals']) {
@@ -49,7 +50,8 @@ test.describe('registry officer', () => {
     await expect(nav.getByRole('link', { name: t('nav.admin') })).toHaveCount(0);
 
     await page.goto('/admin');
-    await expect(page).toHaveURL(/\/map$/);
+    await expect(page).toHaveURL(/\/work$/);
+    await expect(page.getByRole('main').getByRole('heading', { level: 1, name: t('work.title') })).toBeVisible();
   });
 });
 
