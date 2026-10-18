@@ -51,5 +51,5 @@ export function RequireCapability({
 /** Landing route: registry roles open the work overview, recipients open their cards. */
 export function HomeRedirect() {
   const { canSeeRegistry } = useAuth();
-  return <Navigate to={canSeeRegistry ? '/work' : '/signals'} replace />;
+  return <Navigate to={canSeeRegistry ? '/home' : '/signals'} replace />;
 }

@@ -212,15 +212,16 @@ function useGeometry() {
     const measure = () => {
       const bounds = anchor.getBoundingClientRect();
       const box = slot.getBoundingClientRect();
+      const viewportWidth = Math.min(window.innerWidth, document.documentElement.clientWidth);
       const left = box.left - bounds.left;
       const right = box.right - bounds.left;
       const center = bounds.width / 2;
-      const openWidth = Math.min(OPEN_WIDTH, bounds.width - 2 * EDGE_GAP);
+      const openWidth = Math.max(0, Math.min(OPEN_WIDTH, bounds.width - 2 * EDGE_GAP, viewportWidth - 2 * EDGE_GAP));
       const inBand = box.width >= openWidth && box.height >= OPEN_HEIGHT;
       setGeometry({
         mid: box.top - bounds.top + box.height / 2,
         openWidth,
-        openShift: inBand ? clamp(center, left + openWidth / 2, right - openWidth / 2) - center : 0,
+        openShift: inBand ? clamp(center, left + openWidth / 2, right - openWidth / 2) - center : viewportWidth / 2 - bounds.left - center,
         inBand,
       });
     };
@@ -228,7 +229,11 @@ function useGeometry() {
     const observer = new ResizeObserver(measure);
     observer.observe(slot);
     observer.observe(anchor);
-    return () => observer.disconnect();
+    window.addEventListener('resize', measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', measure);
+    };
   }, []);
 
   return { slotRef, geometry };
@@ -267,18 +272,24 @@ export function ActivityIsland() {
         '--mid': `${geometry.mid}px`,
         '--w-open': `${geometry.openWidth}px`,
         '--shift-open': `${geometry.openShift}px`,
+        maxWidth: `calc(100vw - ${EDGE_GAP * 2}px)`,
       } as CSSProperties)
     : undefined;
 
   return (
-    <div ref={slotRef} className="pointer-events-none min-w-0">
+    <>
+      <div
+        ref={slotRef}
+        aria-hidden="true"
+        className="pointer-events-none absolute bottom-0 left-1/2 h-0 w-12 -translate-x-1/2"
+      />
       <div role="status" aria-live="polite" aria-atomic="true" data-testid="activity-live-region" className="sr-only">
         {open && content ? content.announcement : ''}
       </div>
       {geometry && (
         <div
           className={cn(
-            'group pointer-events-none absolute left-1/2 h-12 w-(--w-open) rounded-3xl bg-transparent opacity-0 shadow-none',
+            'group pointer-events-none absolute left-1/2 z-50 h-0 w-0 rounded-3xl bg-transparent opacity-0 shadow-none',
             'top-[calc(var(--mid)-24px)] [transform:translateX(calc(-50%_+_var(--shift-open)))]',
             'transition-[opacity,top,transform,box-shadow] duration-[400ms] ease-[cubic-bezier(0.32,0.72,0,1)]',
             'data-[open=true]:pointer-events-auto data-[open=true]:bg-surface-raised data-[open=true]:opacity-100 data-[open=true]:shadow-glow',
@@ -286,7 +297,7 @@ export function ActivityIsland() {
             'data-[open=true]:[transform:translateX(calc(-50%_+_var(--shift-open)))] data-[open=true]:shadow-glow',
             'data-[open=true]:duration-[580ms] data-[open=true]:ease-[cubic-bezier(0.3,1.35,0.4,1)]',
             // The event panel opens below the header, away from navigation and utility controls.
-            'data-[open=true]:data-[place=below]:top-[calc(100%+8px)]',
+            'data-[open=true]:data-[place=below]:top-[calc(100%+9px)]',
             // Entering the red zone: a red edge and a soft red glow instead of the pink one, nothing that blinks.
             'data-[alert=true]:shadow-[0_0_0_1px_color-mix(in_srgb,var(--zone-red)_62%,transparent),0_8px_28px_-6px_color-mix(in_srgb,var(--zone-red)_45%,transparent)]',
             'motion-reduce:transition-none',
@@ -367,6 +378,6 @@ export function ActivityIsland() {
           )}
         </div>
       )}
-    </div>
+    </>
   );
 }

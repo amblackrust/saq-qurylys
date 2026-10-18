@@ -16,10 +16,10 @@ for (const [role, label] of [
       await page.goto('/');
       await expect(page).toHaveURL(/\/signals$/);
 
-      const nav = page.getByRole('navigation', { name: t('header.menu') });
-      await expect(nav.getByRole('link', { name: t('nav.recipientSignals') })).toBeVisible();
-      for (const hidden of ['map', 'objects', 'ads', 'sources', 'graph', 'admin']) {
-        await expect(nav.getByRole('link', { name: t(`nav.${hidden}`) })).toHaveCount(0);
+      const nav = page.getByRole('navigation', { name: t('nav.primaryNavigation') });
+      await expect(nav.getByTestId('bento-nav-card-signals')).toBeVisible();
+      for (const hidden of ['work', 'adsQueue', 'objects', 'explore', 'tools', 'admin', 'data']) {
+        await expect(nav.getByTestId(`bento-nav-card-${hidden}`)).toHaveCount(0);
       }
       await expect(page.getByText('Мониторинг', { exact: true })).toBeHidden();
       await expect(page.getByTestId('activity-live-region')).toHaveCount(0);
@@ -40,18 +40,18 @@ test.describe('registry officer', () => {
 
   test('has the registry sections but not the administration', async ({ page }) => {
     await page.goto('/');
-    await expect(page).toHaveURL(/\/work$/);
-    await expect(page.getByRole('main').getByRole('heading', { level: 1, name: t('work.title') })).toBeVisible();
+    await expect(page).toHaveURL(/\/home$/);
+    await expect(page.getByRole('main').getByRole('heading', { level: 1, name: t('nav.homeTitle') })).toBeVisible();
 
-    const nav = page.getByRole('navigation', { name: t('header.menu') });
-    for (const shown of ['map', 'objects', 'ads', 'graph', 'signals']) {
-      await expect(nav.getByRole('link', { name: t(`nav.${shown}`) })).toBeVisible();
+    const nav = page.getByRole('navigation', { name: t('nav.primaryNavigation') });
+    for (const shown of ['work', 'adsQueue', 'signals', 'objects', 'explore', 'tools']) {
+      await expect(nav.getByTestId(`bento-nav-card-${shown}`)).toBeVisible();
     }
-    await expect(nav.getByRole('link', { name: t('nav.admin') })).toHaveCount(0);
+    await expect(nav.getByTestId('bento-nav-card-admin')).toHaveCount(0);
 
     await page.goto('/admin');
-    await expect(page).toHaveURL(/\/work$/);
-    await expect(page.getByRole('main').getByRole('heading', { level: 1, name: t('work.title') })).toBeVisible();
+    await expect(page).toHaveURL(/\/home$/);
+    await expect(page.getByRole('main').getByRole('heading', { level: 1, name: t('nav.homeTitle') })).toBeVisible();
   });
 });
 
@@ -61,9 +61,10 @@ test.describe('administrator', () => {
 
   test('sees the administration sections', async ({ page }) => {
     await page.goto('/');
-    const nav = page.getByRole('navigation', { name: t('header.menu') });
-    await expect(nav.getByRole('link', { name: t('nav.admin') })).toBeVisible();
-    await nav.getByRole('link', { name: t('nav.admin') }).click();
+    await expect(page).toHaveURL(/\/home$/);
+    const nav = page.getByRole('navigation', { name: t('nav.primaryNavigation') });
+    await expect(nav.getByTestId('bento-nav-card-admin')).toBeVisible();
+    await nav.getByTestId('bento-nav-card-admin').click();
 
     await expect(page).toHaveURL(/\/admin\/users$/);
     await expect(page.getByRole('heading', { level: 1, name: t('admin:title') })).toBeVisible();

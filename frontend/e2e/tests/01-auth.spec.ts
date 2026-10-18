@@ -21,13 +21,16 @@ test.describe('signed out', () => {
     await expect(page).toHaveURL(/\/login$/);
   });
 
-  test('a registry officer signs in and lands on Today', async ({ page }) => {
+  test('a registry officer signs in and opens Today from the section menu', async ({ page }) => {
     await page.goto('/login');
     await page.getByLabel(t('auth.username'), { exact: true }).fill(CREDENTIALS.mio.username);
     await page.getByLabel(t('auth.password'), { exact: true }).fill(CREDENTIALS.mio.password ?? '');
     await page.getByRole('button', { name: t('auth.login') }).click();
 
-    await expect(page).toHaveURL(/\/work$/);
+    await expect(page).toHaveURL(/\/home$/);
+    await expect(page.getByRole('main').getByRole('heading', { level: 1, name: t('nav.homeTitle') })).toBeVisible();
+    await page.getByTestId('bento-nav-card-work').click();
+    await expect(page).toHaveURL('/work');
     await expect(page.getByRole('main').getByRole('heading', { level: 1, name: t('work.title') })).toBeVisible();
   });
 

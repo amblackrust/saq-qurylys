@@ -16,7 +16,7 @@ const buttonVariants = cva(
         outline: 'border-border-strong text-text-2 hover:bg-hover hover:text-text active:bg-pressed aria-expanded:bg-hover',
         ghost: 'text-text-2 hover:bg-hover hover:text-text active:bg-pressed aria-expanded:bg-hover aria-expanded:text-text',
         /** red zone color: irreversible actions */
-        destructive: 'bg-zone-red text-bg hover:brightness-110 focus-visible:ring-text',
+        destructive: 'bg-zone-red text-zone-red-action-ink hover:brightness-95 focus-visible:ring-text',
         link: 'h-auto rounded-none px-0 text-link underline-offset-4 hover:underline',
       },
       size: {

@@ -5,8 +5,6 @@ import { authFile } from '../support/users';
 
 test.use({ storageState: authFile('mio') });
 
-const NAV = ['map', 'objects', 'ads', 'graph', 'signals'] as const;
-
 test('the activity live region stays quiet without an idle caption', async ({ page }) => {
   await page.goto('/map');
   await expect(page.getByText('Мониторинг', { exact: true })).toBeHidden();
@@ -18,20 +16,35 @@ test('the activity live region stays quiet without an idle caption', async ({ pa
 
 test('the language switch changes the navigation to Kazakh and back', async ({ page }) => {
   await page.goto('/map');
-  const nav = page.getByRole('navigation', { name: t('header.menu') });
-  await expect(nav.getByRole('link', { name: t('nav.objects') })).toBeVisible();
+  const nav = page.getByRole('navigation', { name: t('nav.primaryNavigation') });
+  await expect(nav.getByTestId('bento-nav-card-objects')).toBeVisible();
+  const exploreNav = () => page.getByRole('navigation', {
+    name: t('nav.groupNavigation', { group: t('nav.sectionExplore') }),
+  });
+  await expect(nav.getByTestId('bento-nav-card-explore')).toHaveAttribute('aria-expanded', 'true');
+  await expect(exploreNav().getByTestId('bento-leaf-card-graph')).toBeVisible();
 
   await page.getByText('ҚАЗ', { exact: true }).click();
 
-  const kazakhNav = page.getByRole('navigation', { name: tKk('header.menu') });
-  for (const item of NAV) await expect(kazakhNav.getByRole('link', { name: tKk(`nav.${item}`), exact: true })).toBeVisible();
+  const kazakhNav = page.getByRole('navigation', { name: tKk('nav.primaryNavigation') });
+  await expect(kazakhNav.getByTestId('bento-nav-card-objects')).toBeVisible();
+  await expect(kazakhNav.getByTestId('bento-nav-card-explore')).toHaveAttribute('aria-expanded', 'true');
+  const kazakhExploreNav = page.getByRole('navigation', {
+    name: tKk('nav.groupNavigation', { group: tKk('nav.sectionExplore') }),
+  });
+  await expect(kazakhExploreNav.getByTestId('bento-leaf-card-graph')).toContainText(tKk('nav.graph'));
+  await expect(kazakhExploreNav.getByTestId('bento-selected-leaf')).toContainText(
+    tKk('nav.backToGroup', { group: tKk('nav.sectionExplore') }),
+  );
   await expect(page.getByRole('heading', { level: 1, name: tKk('map:title') })).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('lang', 'kk');
   expect(await page.evaluate(() => localStorage.getItem('saq_lang'))).toBe('kk');
 
   await page.getByText('RU', { exact: true }).click();
 
-  for (const item of NAV) await expect(nav.getByRole('link', { name: t(`nav.${item}`), exact: true })).toBeVisible();
+  await expect(nav.getByTestId('bento-nav-card-objects')).toBeVisible();
+  await expect(nav.getByTestId('bento-nav-card-explore')).toHaveAttribute('aria-expanded', 'true');
+  await expect(exploreNav().getByTestId('bento-leaf-card-graph')).toContainText(t('nav.graph'));
   await expect(page.getByRole('heading', { level: 1, name: t('map:title') })).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('lang', 'ru');
   expect(await page.evaluate(() => localStorage.getItem('saq_lang'))).toBe('ru');

@@ -6,6 +6,8 @@ import { LoginPage } from '@/features/login/LoginPage';
 import { useTranslation } from 'react-i18next';
 import { EmptyState } from '@/components/QueryState';
 import { VisionGate } from '@/features/vision/VisionGate';
+import { NavigationGroupPage } from '@/features/navigation/NavigationGroupPage';
+import { NavigationHomePage } from '@/features/navigation/NavigationHomePage';
 
 // Screens are code-split; the map brings in maplibre-gl, which is the heaviest dependency.
 const MapPage = lazy(() => import('@/features/map/MapPage').then((m) => ({ default: m.MapPage })));
@@ -58,6 +60,8 @@ export function App() {
         }
       >
         <Route index element={<HomeRedirect />} />
+        <Route path="home" element={<NavigationHomePage />} />
+        <Route path="home/:group" element={<NavigationGroupPage />} />
         <Route
           path="work"
           element={

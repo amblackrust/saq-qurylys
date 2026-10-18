@@ -4,7 +4,7 @@ import { t, tKk } from '../support/i18n';
 import type { Page, Route } from '@playwright/test';
 import type { ActivityEvent, AdDetail, AdReviewState, Assignment, Assignee, EvidenceMeta, LinkGraph, ObjectDetail, ObjectDocument, Role, SearchResults, SignalDetail, SignalMaterials, SignalRecipient, SignalStatus, User, VisionAsset, VisionFinding, VisionFrame, VisionSessionDetail } from '../../src/api/types';
 
-const screenshotDir = '/tmp/ayqyn-ux-final';
+const screenshotDir = '/tmp/ayqyn-bento';
 const objectRow = {
   id: 7,
   code: 'D-07',
@@ -1027,6 +1027,20 @@ function expectCleanBrowser(harness: Harness) {
   expect(unexplainedFailures).toEqual([]);
 }
 
+function contrastRatio(foreground: string, background: string): number {
+  const luminance = (color: string) => {
+    const channels = color.match(/[\d.]+/g)?.slice(0, 3).map(Number);
+    if (!channels || channels.length !== 3) throw new Error(`Unexpected computed color: ${color}`);
+    const linear = channels.map((channel) => {
+      const value = channel / 255;
+      return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    });
+    return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+  };
+  const [first, second] = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
+  return (first + 0.05) / (second + 0.05);
+}
+
 test('work opens as the operator task queue, links the real next item and supports Kazakh', async ({ page }) => {
   const returned = makeSignal('returned', 'gask');
   returned.id = 43;
@@ -1037,31 +1051,150 @@ test('work opens as the operator task queue, links the real next item and suppor
   });
 
   await page.goto('/');
-  await expect(page).toHaveURL(/\/work$/);
+  await expect(page).toHaveURL(/\/home$/);
+  await expect(page.getByRole('main').getByRole('heading', { level: 1, name: t('nav.homeTitle') })).toBeVisible();
+  await screenshot(page, 'home-operator-desktop');
+  const homeNav = page.getByRole('navigation', { name: t('nav.primaryNavigation') });
+  await expect(homeNav.getByTestId('bento-nav-card-work')).toHaveAttribute('href', '/work');
+  await homeNav.getByTestId('bento-nav-card-work').focus();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL('/work');
   await expect(page.getByRole('main').getByRole('heading', { level: 1, name: t('work.title') })).toBeVisible();
+  await expect(page.getByTestId('bento-section-panel')).toBeVisible();
   await expect(page.getByRole('link', { name: 'Доработать карточку SIG-2026-0043' })).toHaveAttribute('href', '/signals/43');
-  const primaryNav = page.getByRole('navigation', { name: t('header.menu') });
-  const adsQueue = page.getByRole('link', { name: t('work.adsQueueLink') });
+  const primaryNav = page.getByRole('navigation', { name: t('nav.primaryNavigation') });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await screenshot(page, 'section-work-mobile-390');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const adsQueue = primaryNav.getByTestId('bento-nav-card-adsQueue');
   await expect(adsQueue).toHaveAttribute('href', '/ads?queue=true');
-  await screenshot(page, 'work-mio-ru');
+  await screenshot(page, 'section-work-desktop');
   await adsQueue.click();
   await expect(page).toHaveURL('/ads?queue=true');
   await expect(page.getByRole('combobox', { name: t('ads:review.stateLabel') })).toBeVisible();
-  await expect(primaryNav.locator('[aria-current="page"]')).toHaveCount(1);
-  await expect(primaryNav.getByRole('link', { name: t('nav.ads') })).toHaveAttribute('aria-current', 'page');
-  await primaryNav.getByRole('link', { name: t('nav.adsArchive') }).click();
+  await expect(page.getByTestId('bento-section-panel')).toBeVisible();
+  await primaryNav.getByTestId('bento-nav-card-tools').click();
+  await expect(page).toHaveURL('/home/tools');
+  await page.getByTestId('bento-leaf-card-adsArchive').click();
   await expect(page).toHaveURL('/ads');
-  await expect(primaryNav.locator('[aria-current="page"]')).toHaveCount(1);
-  await expect(primaryNav.getByRole('link', { name: t('nav.adsArchive') })).toHaveAttribute('aria-current', 'page');
-  await page.goBack();
+  await expect(page.getByTestId('bento-selected-leaf')).toBeVisible();
+  await page.getByTestId('bento-selected-leaf').click();
+  await expect(page).toHaveURL('/home/tools');
+  await page.getByTestId('bento-home-link').click();
+  await expect(page).toHaveURL('/home');
+  await homeNav.getByTestId('bento-nav-card-work').click();
+  await expect(page).toHaveURL('/work');
+  await primaryNav.getByTestId('bento-nav-card-adsQueue').click();
   await expect(page).toHaveURL('/ads?queue=true');
   await page.goBack();
-  await expect(page).toHaveURL(/\/work$/);
+  await expect(page).toHaveURL('/work');
+  await page.getByTestId('bento-home-link').click();
+  await expect(page).toHaveURL('/home');
 
   await page.getByText('ҚАЗ', { exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'kk');
+  await expect(page.getByRole('main').getByRole('heading', { level: 1, name: tKk('nav.homeTitle') })).toBeVisible();
+  await screenshot(page, 'home-operator-kk-desktop');
+  await page.getByTestId('bento-nav-card-work').click();
   await expect(page.getByRole('main').getByRole('heading', { level: 1, name: tKk('work.title') })).toBeVisible();
-  await screenshot(page, 'work-mio-kk');
+  await screenshot(page, 'section-work-kk-desktop');
+  expect(harness.mutations).toEqual([]);
+  expectCleanBrowser(harness);
+});
+
+test('bento navigation moves the selected card and respects reduced motion', async ({ page }) => {
+  const harness = await installMocks(page, 'mio_officer');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.goto('/home');
+  const tile = page.getByTestId('bento-nav-card-work');
+  const before = await tile.boundingBox();
+  expect(before).not.toBeNull();
+
+  await tile.click();
+  await expect(page).toHaveURL('/work');
+  const moving = page.getByTestId('bento-section-panel');
+  const samples = await page.evaluate(async () => {
+    const values: boolean[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const element = document.querySelector<HTMLElement>('[data-testid="bento-section-panel"]');
+      const transform = element ? getComputedStyle(element).transform : 'none';
+      values.push(transform !== 'none' && !new DOMMatrixReadOnly(transform).isIdentity);
+    }
+    return values;
+  });
+  await expect(moving).toBeVisible();
+  expect(samples.some(Boolean), `expected a non-identity spatial transform during layout transition; got ${samples.join(', ')}`).toBe(true);
+  await expect.poll(async () => moving.evaluate((element) => getComputedStyle(element).transform)).toBe('none');
+
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.getByTestId('bento-home-link').click();
+  await expect(page).toHaveURL('/home');
+  await page.getByTestId('bento-nav-card-work').click();
+  await expect(page).toHaveURL('/work');
+  await expect(page.getByTestId('bento-section-panel')).toBeVisible();
+  expectCleanBrowser(harness);
+});
+
+test('work composition preserves keyboard actions and fits narrow screens', async ({ page }) => {
+  const returned = makeSignal('returned', 'gask');
+  returned.id = 43;
+  returned.number = 'SIG-2026-0043';
+  returned.object_name = 'Жилой комплекс «Северный бриз»: очередь проверки, корпус 12';
+  const assignment = makeAssignment();
+  assignment.object.name = 'Жилой комплекс «Северный бриз», корпус 12';
+  const harness = await installMocks(page, 'mio_officer', {
+    signals: [returned, makeSignal('requires_confirmation', 'gask')],
+    assignments: [assignment],
+  });
+
+  await page.goto('/work');
+  const nextCard = page.getByTestId('work-next-card');
+  const primaryAction = page.getByTestId('work-primary-action');
+  await expect(nextCard).toBeVisible();
+  await expect(primaryAction).toHaveAttribute('href', '/signals/43');
+  await expect(page.getByTestId('work-assignments-card')).toBeVisible();
+  await expect(page.getByTestId('work-objects-card')).toBeVisible();
+  await expect(page.getByTestId('work-ads-card')).toBeVisible();
+  await expect(page.getByTestId('work-report-card')).toBeVisible();
+
+  const confirmationTab = page.getByTestId('work-signal-status-requires_confirmation');
+  await confirmationTab.focus();
+  await page.keyboard.press('Enter');
+  await expect(confirmationTab).toHaveAttribute('aria-pressed', 'true');
+  await expect(confirmationTab).toBeFocused();
+  await expect(page.getByTestId('work-signal-details')).toBeVisible();
+
+  const report = page.getByTestId('work-report-card');
+  const reportSummary = report.locator('summary');
+  await reportSummary.focus();
+  await page.keyboard.press('Enter');
+  await expect.poll(() => report.evaluate((element) => (element as HTMLDetailsElement).open)).toBe(true);
+  await expect(reportSummary).toBeFocused();
+
+  for (const width of [320, 390, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const dimensions = await page.evaluate(() => ({
+      viewport: document.documentElement.clientWidth,
+      document: document.documentElement.scrollWidth,
+      main: document.querySelector('main')?.scrollWidth ?? 0,
+      overflowing: Array.from(document.body.querySelectorAll<HTMLElement>('*')).flatMap((element) => {
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        if (style.display === 'none' || style.visibility === 'hidden' || rect.width === 0 || rect.height === 0) return [];
+        if (rect.right <= document.documentElement.clientWidth + 1 && rect.left >= -1) return [];
+        return [{ tag: element.tagName, className: String(element.className).slice(0, 80), left: rect.left, right: rect.right, text: element.innerText?.slice(0, 45) }];
+      }).slice(0, 8),
+    }));
+    expect(dimensions.document, `document must not overflow at ${width}px; elements: ${JSON.stringify(dimensions.overflowing)}`).toBeLessThanOrEqual(dimensions.viewport);
+    expect(dimensions.main, `main content must not overflow at ${width}px`).toBeLessThanOrEqual(dimensions.viewport);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await screenshot(page, `work-composition-${width}`);
+  }
+
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await reportSummary.click();
+  await expect.poll(() => report.evaluate((element) => (element as HTMLDetailsElement).open)).toBe(false);
   expect(harness.mutations).toEqual([]);
   expectCleanBrowser(harness);
 });
@@ -1069,13 +1202,17 @@ test('work opens as the operator task queue, links the real next item and suppor
 test('administrator opens the read-only task overview and recipient is kept out of registry work', async ({ page }) => {
   const adminHarness = await installMocks(page, 'admin', { signals: [makeSignal('requires_confirmation', 'gask')] });
   await page.goto('/');
+  await expect(page).toHaveURL(/\/home$/);
+  await expect(page.getByRole('main').getByRole('heading', { level: 1, name: t('nav.homeTitle') })).toBeVisible();
+  await page.getByTestId('bento-nav-card-work').click();
   await expect(page).toHaveURL(/\/work$/);
   await expect(page.getByRole('main').getByRole('heading', { level: 1, name: t('work.adminTitle') })).toBeVisible();
   await expect(page.getByText(/Источников публикаций|Сборщики/).first()).toBeVisible();
-  const openCards = page.getByRole('navigation').getByRole('link', { name: t('nav.cards') });
-  await expect(openCards).toHaveAttribute('href', '/signals');
+  const openData = page.getByTestId('bento-nav-card-data');
+  await expect(openData).toHaveAttribute('href', '/home/data');
   await screenshot(page, 'work-admin-readonly');
-  await openCards.click();
+  await openData.click();
+  await page.getByTestId('bento-leaf-card-signals').click();
   await expect(page).toHaveURL(/\/signals$/);
   const row = page.getByRole('row').filter({ hasText: 'SIG-2026-0042' });
   await expect(row).toContainText('Просмотр карточки');
@@ -1087,6 +1224,7 @@ test('administrator opens the read-only task overview and recipient is kept out 
   const recipientHarness = await installMocks(page, 'gask');
   await page.goto('/');
   await expect(page).toHaveURL(/\/signals$/);
+  await expect(page.getByTestId('bento-navigation').getByRole('navigation', { name: t('nav.primaryNavigation') }).getByTestId('bento-nav-card-signals')).toBeVisible();
   await page.goto('/work');
   await expect(page).toHaveURL(/\/signals$/);
   await expect(page.getByRole('heading', { level: 1, name: t('signals:list.title') })).toBeVisible();
@@ -1100,12 +1238,12 @@ test('role landings and navigation preserve recipient registry restrictions', as
     const harness = await installMocks(page, role);
     await page.goto('/');
     const recipient = role === 'gask' || role === 'law_enforcement';
-    await expect(page).toHaveURL(recipient ? /\/signals$/ : /\/work$/);
-    const nav = page.getByRole('navigation', { name: t('header.menu') });
+    await expect(page).toHaveURL(recipient ? /\/signals$/ : /\/home$/);
+    const nav = page.getByRole('navigation', { name: t('nav.primaryNavigation') });
     if (recipient) {
-      await expect(nav.getByRole('link', { name: t('nav.recipientSignals') })).toBeVisible();
-      for (const key of ['ads', 'objects', 'map', 'graph', 'sources', 'admin']) {
-        await expect(nav.getByRole('link', { name: t(`nav.${key}`) })).toHaveCount(0);
+      await expect(nav.getByTestId('bento-nav-card-signals')).toBeVisible();
+      for (const key of ['work', 'adsQueue', 'objects', 'explore', 'tools', 'admin', 'data']) {
+        await expect(nav.getByTestId(`bento-nav-card-${key}`)).toHaveCount(0);
       }
       for (const path of ['/map', '/objects', '/ads', '/graph', '/sources', '/control', '/admin']) {
         await page.goto(path);
@@ -1114,14 +1252,15 @@ test('role landings and navigation preserve recipient registry restrictions', as
       await expect(page.getByRole('button', { name: t('signals:list.create') })).toHaveCount(0);
     } else {
       if (role === 'admin') {
-        await expect(nav.getByRole('link', { name: t('nav.adminOverview') })).toHaveAttribute('href', '/work');
-        await expect(nav.getByRole('link', { name: t('nav.admin') })).toHaveAttribute('href', '/admin');
-        await expect(nav.getByRole('link', { name: t('nav.adsArchive') })).toHaveAttribute('href', '/ads');
+        await expect(nav.getByTestId('bento-nav-card-work')).toHaveAttribute('href', '/work');
+        await expect(nav.getByTestId('bento-nav-card-admin')).toHaveAttribute('href', '/admin');
+        await expect(nav.getByTestId('bento-nav-card-data')).toHaveAttribute('href', '/home/data');
       } else {
-        await expect(nav.getByRole('link', { name: t('nav.work') })).toBeVisible();
-        await expect(nav.getByRole('link', { name: t('nav.ads') })).toHaveAttribute('href', '/ads?queue=true');
-        await expect(nav.getByRole('link', { name: t('nav.adsArchive') })).toHaveAttribute('href', '/ads');
-        await expect(nav.getByRole('link', { name: t('nav.admin') })).toHaveCount(0);
+        await expect(nav.getByTestId('bento-nav-card-work')).toHaveAttribute('href', '/work');
+        await expect(nav.getByTestId('bento-nav-card-adsQueue')).toHaveAttribute('href', '/ads?queue=true');
+        await expect(nav.getByTestId('bento-nav-card-signals')).toHaveAttribute('href', '/signals');
+        await expect(nav.getByTestId('bento-nav-card-objects')).toHaveAttribute('href', '/objects');
+        await expect(nav.getByTestId('bento-nav-card-admin')).toHaveCount(0);
       }
     }
     expect(harness.mutations).toEqual([]);
@@ -1134,7 +1273,8 @@ test('operator work distinguishes an unavailable queue from an empty queue', asy
     signalListFailures: { returned: { code: 'temporary_failure', message: 'Queue temporarily unavailable' } },
   });
   await page.goto('/work');
-  await expect(page.getByRole('alert').filter({ hasText: 'Queue temporarily unavailable' })).toBeVisible();
+  await expect(page.getByTestId('work-next-card').getByRole('alert')).toContainText('Queue temporarily unavailable');
+  await expect(page.getByTestId('work-signal-details').getByRole('alert')).toContainText('Queue temporarily unavailable');
   await expect(page.getByText(t('work.emptyQueue'), { exact: true })).toHaveCount(0);
   const availableQueues = page.getByRole('navigation', { name: t('work.queuesTitle') });
   await expect(availableQueues.getByRole('button')).toHaveCount(1);
@@ -1168,6 +1308,53 @@ test('operator work does not use a stale assignment as the main action after its
   await expect(page.getByRole('alert').filter({ hasText: 'Assignments temporarily unavailable' })).toBeVisible();
   await expect(page.getByRole('link', { name: nextTask })).toHaveCount(0);
   await expect.poll(() => harness.assignmentRequests.length).toBeGreaterThan(1);
+  const retry = page.getByTestId('work-assignments-card').getByRole('button', { name: t('retry') });
+  await expect(retry).toBeVisible();
+  for (const colorScheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme });
+    await expect(page.locator('html')).toHaveAttribute('data-theme', colorScheme);
+    const colors = await retry.evaluate((button) => ({
+      foreground: getComputedStyle(button).color,
+      background: getComputedStyle(button).backgroundColor,
+    }));
+    expect(contrastRatio(colors.foreground, colors.background), `assignment retry contrast in ${colorScheme}`).toBeGreaterThanOrEqual(4.5);
+    await screenshot(page, `work-assignment-error-${colorScheme}`);
+  }
+  await retry.focus();
+  await expect(retry).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(retry).toBeFocused();
+  expectCleanBrowser(harness);
+});
+
+test('colored signal-card retry controls stay readable and keyboard reachable in both themes', async ({ page }) => {
+  const harness = await installMocks(page, 'mio_officer', {
+    signalListFailures: { returned: { code: 'temporary_failure', message: 'Queue temporarily unavailable' } },
+  });
+  await page.goto('/work');
+  const nextRetry = page.getByTestId('work-next-card').getByRole('button', { name: t('retry') });
+  const signalRetry = page.getByTestId('work-signal-details').getByRole('button', { name: t('retry') });
+  await expect(nextRetry).toBeVisible();
+  await expect(signalRetry).toBeVisible();
+
+  for (const colorScheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme });
+    await expect(page.locator('html')).toHaveAttribute('data-theme', colorScheme);
+    for (const retry of [nextRetry, signalRetry]) {
+      const colors = await retry.evaluate((button) => ({
+        foreground: getComputedStyle(button).color,
+        background: getComputedStyle(button).backgroundColor,
+      }));
+      expect(contrastRatio(colors.foreground, colors.background), `signal retry contrast in ${colorScheme}`).toBeGreaterThanOrEqual(4.5);
+    }
+    await screenshot(page, `work-signal-error-${colorScheme}`);
+  }
+
+  await signalRetry.focus();
+  await expect(signalRetry).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(signalRetry).toBeFocused();
+  expect(harness.mutations).toEqual([]);
   expectCleanBrowser(harness);
 });
 
@@ -1284,7 +1471,7 @@ test('Vision creates a fixture session and uploads a supported photo through the
   expect(publishMutation && JSON.parse(publishMutation.body ?? '{}')).toMatchObject({ text: 'Наружная реклама по fixture', object_id: null });
 });
 
-test('light and dark appearance persists; the sidebar and mobile drawer fit supported widths', async ({ page }) => {
+test('light and dark appearance persists; the card navigation fits supported widths', async ({ page }) => {
   const harness = await installMocks(page, 'mio_officer');
   await page.goto('/work');
   const header = page.getByRole('banner');
@@ -1364,7 +1551,22 @@ test('light and dark appearance persists; the sidebar and mobile drawer fit supp
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await expect(page.locator('html')).toHaveClass(/dark/);
   await expect.poll(() => page.evaluate(() => localStorage.getItem('saq_theme'))).toBe('dark');
-  await screenshot(page, 'work-dark-1440');
+  await screenshot(page, 'section-work-dark-1440');
+  await page.getByTestId('bento-home-link').click();
+  await expect(page).toHaveURL('/home');
+  await screenshot(page, 'home-dark-1440');
+  await page.getByTestId('bento-nav-card-tools').click();
+  await expect(page).toHaveURL('/home/tools');
+  await screenshot(page, 'tools-hub-dark-1440');
+  await page.getByTestId('bento-home-link').click();
+  await page.getByTestId('bento-nav-card-explore').click();
+  await expect(page).toHaveURL('/home/explore');
+  await screenshot(page, 'explore-hub-dark-1440');
+  await page.getByTestId('bento-leaf-card-map').click();
+  await expect(page).toHaveURL('/map');
+  await screenshot(page, 'map-section-dark-1440');
+  await page.getByTestId('bento-home-link').click();
+  await expect(page).toHaveURL('/home');
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
 
@@ -1380,12 +1582,60 @@ test('light and dark appearance persists; the sidebar and mobile drawer fit supp
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
 
   await page.setViewportSize({ width: 390, height: 844 });
-  const menuButton = header.getByRole('button', { name: 'Разделы', exact: true });
-  await menuButton.click();
-  const drawer = page.getByRole('dialog');
-  await expect(drawer).toBeVisible();
-  await expect(drawer.getByRole('navigation').getByRole('link', { name: 'Карта' })).toBeVisible();
-  const languageTargets = drawer.getByRole('radio', { name: /^(RU|ҚАЗ)$/ });
+  await page.goto('/home');
+  const bento = page.getByTestId('bento-navigation');
+  await expect(page.locator('aside')).toHaveCount(0);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await screenshot(page, 'home-mobile-390');
+  const homeExplore = bento.getByTestId('bento-nav-card-explore');
+  await homeExplore.focus();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL('/home/explore');
+  await expect(page.getByRole('navigation', { name: t('nav.groupNavigation', { group: t('nav.sectionExplore') }) })).toBeVisible();
+  await expect(bento.getByTestId('bento-leaf-card-map')).toBeVisible();
+  await screenshot(page, 'explore-hub-mobile-390');
+  await bento.getByTestId('bento-leaf-card-map').click();
+  await expect(page).toHaveURL('/map');
+  await expect(page.getByTestId('bento-selected-leaf')).toBeVisible();
+  await bento.getByTestId('bento-selected-leaf').click();
+  await expect(page).toHaveURL('/home/explore');
+  await page.getByTestId('bento-home-link').click();
+  await expect(page).toHaveURL('/home');
+
+  await page.setViewportSize({ width: 320, height: 844 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await screenshot(page, 'home-mobile-320');
+  const assertHomeLabelsFit = async (language: string) => {
+    const labels = await bento.locator('nav[aria-label]').first().locator('[data-testid^="bento-nav-card-"]').evaluateAll((links) =>
+      links.map((link) => {
+        const article = link.closest('article');
+        const label = link.querySelector<HTMLElement>(':scope > span:nth-of-type(2) > span');
+        if (!article || !label) return { id: link.getAttribute('data-testid'), missing: true, textRight: 0, cardRight: 0, scrollWidth: 0, clientWidth: 0 };
+        const cardBounds = article.getBoundingClientRect();
+        const textBounds = label.getBoundingClientRect();
+        return {
+          id: link.getAttribute('data-testid'),
+          missing: false,
+          textRight: textBounds.right,
+          cardRight: cardBounds.right,
+          scrollWidth: label.scrollWidth,
+          clientWidth: label.clientWidth,
+        };
+      }),
+    );
+    expect(labels.length, `${language} home must render role-available navigation cards`).toBeGreaterThan(0);
+    for (const label of labels) {
+      expect(label.missing, `${language} ${label.id} title must be in the tile`).toBe(false);
+      if (!label.missing) {
+        expect(label.textRight, `${language} ${label.id} title must fit its tile`).toBeLessThanOrEqual(label.cardRight + 1);
+        expect(label.scrollWidth, `${language} ${label.id} title words must wrap`).toBeLessThanOrEqual(label.clientWidth + 1);
+      }
+    }
+  };
+  await assertHomeLabelsFit('RU');
+
+  const languageTargets = header.getByRole('radio', { name: /^(RU|ҚАЗ)$/ });
   await expect(languageTargets).toHaveCount(2);
   for (const target of await languageTargets.all()) {
     const box = await target.boundingBox();
@@ -1393,50 +1643,24 @@ test('light and dark appearance persists; the sidebar and mobile drawer fit supp
     expect(box!.width).toBeGreaterThanOrEqual(44);
     expect(box!.height).toBeGreaterThanOrEqual(44);
     expect(box!.x).toBeGreaterThanOrEqual(0);
-    expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(320);
   }
-  const mobileProfile = drawer.getByRole('button', { name: 'Меню пользователя' });
+  const mobileProfile = header.getByRole('button', { name: 'Меню пользователя' });
   await mobileProfile.focus();
   await page.keyboard.press('Enter');
   await expect(profileMenu).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(profileMenu).toBeHidden();
   await expect(mobileProfile).toBeFocused();
-  await page.keyboard.press('Escape');
-  await expect(drawer).toBeHidden();
-  await expect(menuButton).toBeFocused();
-  await menuButton.click();
-  await expect(drawer).toBeVisible();
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await expect(drawer).toBeHidden();
-  await expect.poll(() => page.locator('body').evaluate((body) => getComputedStyle(body).overflow)).not.toBe('hidden');
-  await page.setViewportSize({ width: 390, height: 844 });
-  await menuButton.click();
-  const drawerNav = drawer.getByRole('navigation');
-  await expect(drawerNav.locator('[aria-current="page"]')).toHaveCount(1);
-  await drawerNav.getByRole('link', { name: t('nav.ads') }).click();
-  await expect(page).toHaveURL('/ads?queue=true');
-  await menuButton.click();
-  await expect(drawerNav.locator('[aria-current="page"]')).toHaveCount(1);
-  await expect(drawerNav.getByRole('link', { name: t('nav.ads') })).toHaveAttribute('aria-current', 'page');
-  await drawerNav.getByRole('link', { name: t('nav.adsArchive') }).click();
-  await expect(page).toHaveURL('/ads');
-  await menuButton.click();
-  await expect(drawerNav.locator('[aria-current="page"]')).toHaveCount(1);
-  await expect(drawerNav.getByRole('link', { name: t('nav.adsArchive') })).toHaveAttribute('aria-current', 'page');
-  await drawerNav.getByRole('link', { name: t('nav.work') }).click();
-  await expect(page).toHaveURL(/\/work$/);
-  await expect(drawer).toBeHidden();
-
-  await menuButton.click();
-  const kazakh = drawer.getByRole('radio', { name: 'ҚАЗ' });
+  const kazakh = header.getByRole('radio', { name: 'ҚАЗ' });
   await kazakh.click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'kk');
   await expect(kazakh).toHaveAttribute('aria-checked', 'true');
-  await drawer.getByRole('radio', { name: 'RU' }).click();
+  await assertHomeLabelsFit('KK');
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await screenshot(page, 'home-mobile-320-kk');
+  await header.getByRole('radio', { name: 'RU' }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'ru');
-  await page.keyboard.press('Escape');
-  await expect(drawer).toBeHidden();
   await expect(header.getByRole('button', { name: 'Уведомления' })).toBeVisible();
 
   await page.addInitScript(() => {
@@ -1625,26 +1849,30 @@ test('activity notification opens below the sticky header and navigates to its e
   const liveRegion = page.getByTestId('activity-live-region');
   await expect(liveRegion).toHaveAttribute('aria-live', 'polite');
   await expect(liveRegion).toContainText('SIG-UI-0042');
-  const metrics = await page.evaluate(() => {
-    const header = document.querySelector('header');
-    const island = header?.querySelector<HTMLElement>('[data-open="true"][data-place="below"]');
-    if (!header || !island) throw new Error('Open activity island was not placed below the header');
-    const headerRect = header.getBoundingClientRect();
-    const islandRect = island.getBoundingClientRect();
-    return {
-      headerBottom: headerRect.bottom,
-      islandLeft: islandRect.left,
-      islandRight: islandRect.right,
-      islandTop: islandRect.top,
-      islandBottom: islandRect.bottom,
-      viewportWidth: document.documentElement.clientWidth,
-    };
-  });
-  expect(metrics.islandTop).toBeGreaterThanOrEqual(metrics.headerBottom + 7);
-  expect(metrics.islandLeft).toBeGreaterThanOrEqual(16);
-  expect(metrics.islandRight).toBeLessThanOrEqual(metrics.viewportWidth - 16);
-  expect(metrics.islandBottom).toBeGreaterThan(metrics.islandTop);
-  await screenshot(page, 'monitoring-activity-open');
+  for (const width of [1440, 390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    await activity.hover();
+    const metrics = await page.evaluate(() => {
+      const header = document.querySelector('header');
+      const island = document.querySelector<HTMLElement>('[data-open="true"][data-place="below"]');
+      if (!header || !island) throw new Error('Open activity island was not placed below the header');
+      const headerRect = header.getBoundingClientRect();
+      const islandRect = island.getBoundingClientRect();
+      return {
+        headerBottom: headerRect.bottom,
+        islandLeft: islandRect.left,
+        islandRight: islandRect.right,
+        islandTop: islandRect.top,
+        islandBottom: islandRect.bottom,
+        viewportWidth: document.documentElement.clientWidth,
+      };
+    });
+    expect(metrics.islandTop, `activity popover must clear header at ${width}px`).toBeGreaterThanOrEqual(metrics.headerBottom + 7);
+    expect(metrics.islandLeft, `activity popover left bound at ${width}px`).toBeGreaterThanOrEqual(16);
+    expect(metrics.islandRight, `activity popover right bound at ${width}px`).toBeLessThanOrEqual(metrics.viewportWidth - 16);
+    expect(metrics.islandBottom).toBeGreaterThan(metrics.islandTop);
+    if (width === 320) await screenshot(page, 'monitoring-activity-open-320');
+  }
   await activity.click();
   await expect(page).toHaveURL(/\/signals\/42$/);
   expect(harness.mutations).toEqual([]);
@@ -1663,7 +1891,7 @@ test('mobile object next-step anchors clear the sticky header and available sign
     await expect(page.getByRole('button', { name: 'Создать карточку вручную' })).toBeVisible();
     if (width === 390) {
       await page.keyboard.press('Tab');
-      await expect(page.getByRole('banner').getByRole('button', { name: 'Разделы', exact: true })).toBeFocused();
+      await expect(page.getByTestId('bento-home-link')).toBeFocused();
     }
     const anchor = page.getByRole('link', { name: 'К причинам оценки' });
     await anchor.click();
@@ -2184,7 +2412,7 @@ test('unsaved signal drafts protect Link and browser-back navigation and preserv
   await expect(page).toHaveURL(/\/signals\/42\?/);
   await expect(note).toHaveValue('Черновик должен сохраниться при выборе «Остаться»');
 
-  await page.getByRole('navigation', { name: t('header.menu') }).getByRole('link', { name: t('nav.work') }).click();
+  await page.getByTestId('bento-nav-card-work').click();
   await expect(blocker).toBeVisible();
   await blocker.getByRole('button', { name: t('signals:unsaved.leave') }).click();
   await expect(page).toHaveURL(/\/work$/);
@@ -2202,7 +2430,7 @@ test('saving a signal draft clears its navigation blocker', async ({ page }) => 
   await expect(page.getByRole('status').filter({ hasText: t('signals:unsaved.message') })).toHaveCount(0);
   expect(harness.state.signal.sections.note).toBe('Сохранённое примечание');
   expect(harness.mutations.filter(({ method, path }) => method === 'PATCH' && path === '/signals/42')).toHaveLength(1);
-  await page.getByRole('navigation', { name: t('header.menu') }).getByRole('link', { name: t('nav.work') }).click();
+  await page.getByTestId('bento-nav-card-work').click();
   await expect(page).toHaveURL(/\/work$/);
   await expect(page.getByRole('alertdialog')).toHaveCount(0);
   expectCleanBrowser(harness);
@@ -2233,7 +2461,7 @@ test('disabled collectors route staff to manual ad entry without starting a coll
   const harness = await installMocks(page, 'mio_officer', { ads: [] });
   await page.setViewportSize({ width: 320, height: 844 });
   await page.goto('/sources');
-  await expect(page.getByRole('article').filter({ hasText: 'ЖК Северный бриз · объявления OLX' })).toBeVisible();
+  await expect(page.getByTestId('bento-section-panel').getByRole('article').filter({ hasText: 'ЖК Северный бриз · объявления OLX' })).toBeVisible();
   let dimensions = await page.evaluate(() => ({ client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }));
   expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.client);
   const watchSource = page.getByRole('switch', { name: 'Следить за источником ЖК Северный бриз · объявления OLX' });
@@ -2801,8 +3029,19 @@ test('global search opens object and signal results on desktop and stays inside 
   const harness = await installMocks(page, 'mio_officer');
   await page.goto('/work');
   const search = page.getByRole('combobox', { name: 'Глобальный поиск' });
+  await expect(search).toBeVisible();
+  const focusBeforeShortcut = await page.evaluate(() => ({
+    tag: document.activeElement?.tagName ?? null,
+    testId: document.activeElement instanceof HTMLElement ? document.activeElement.dataset.testid ?? null : null,
+    label: document.activeElement instanceof HTMLElement ? document.activeElement.getAttribute('aria-label') : null,
+  }));
   await page.keyboard.press('/');
-  await expect(search).toBeFocused();
+  const focusAfterShortcut = await page.evaluate(() => ({
+    tag: document.activeElement?.tagName ?? null,
+    testId: document.activeElement instanceof HTMLElement ? document.activeElement.dataset.testid ?? null : null,
+    label: document.activeElement instanceof HTMLElement ? document.activeElement.getAttribute('aria-label') : null,
+  }));
+  await expect(search, `slash shortcut focus: ${JSON.stringify({ before: focusBeforeShortcut, after: focusAfterShortcut })}`).toBeFocused();
   await search.fill('42');
 
   const listbox = page.getByRole('listbox', { name: 'Глобальный поиск' });
@@ -3125,14 +3364,11 @@ test('work reports and object dossiers download authenticated PDF files', async 
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
   await screenshot(page, 'work-report-mobile-320-light');
 
-  const mobileMenu = page.getByRole('button', { name: /Разделы|Бөлімдер/ });
   const largeFontButton = page.getByRole('button', { name: /Крупный шрифт|Ірі қаріп/ });
   await largeFontButton.click();
   await expect(largeFontButton).toHaveAttribute('aria-pressed', 'true');
   for (const language of ['RU', 'ҚАЗ']) {
-    await mobileMenu.click();
     await page.getByRole('radio', { name: language }).click();
-    await page.keyboard.press('Escape');
     const currentZones = reportPanel.getByRole('combobox');
     const priorityLabel = language === 'RU' ? 'Красные и жёлтые' : 'Қызыл және сары аймақтар';
     const allLabel = language === 'RU' ? 'Все объекты' : 'Барлық объектілер';
@@ -3169,7 +3405,6 @@ test('work reports and object dossiers download authenticated PDF files', async 
     await reportScreenshot(`report-mobile-320-large-${language === 'RU' ? 'ru' : 'kk'}-all`);
     await screenshot(page, `work-report-mobile-320-large-${language === 'RU' ? 'ru' : 'kk'}`);
   }
-  await mobileMenu.click();
   await page.getByRole('radio', { name: 'RU' }).click();
   await page.keyboard.press('Escape');
   await largeFontButton.click();
@@ -3203,7 +3438,6 @@ test('work reports and object dossiers download authenticated PDF files', async 
   const printState = await page.evaluate(() => {
     const hiddenControls = Array.from(document.querySelectorAll<HTMLElement>('[data-print="hide"]'));
     const sidebar = document.querySelector<HTMLElement>('aside[data-print="hide"]');
-    const layout = document.querySelector<HTMLElement>('[data-print="layout"]');
     const mainShell = document.querySelector<HTMLElement>('[data-print="main-shell"]');
     const main = document.querySelector<HTMLElement>('main');
     return {
@@ -3211,12 +3445,11 @@ test('work reports and object dossiers download authenticated PDF files', async 
       pathname: window.location.pathname,
       printMediaMatches: window.matchMedia('print').matches,
       hiddenControlsAreHidden: hiddenControls.every((element) => getComputedStyle(element).display === 'none'),
-      sidebarIsHidden: sidebar !== null && getComputedStyle(sidebar).display === 'none',
+      sidebarAbsent: sidebar === null,
       bodyBackground: getComputedStyle(document.body).backgroundColor,
       bodyColor: getComputedStyle(document.body).color,
       rootBgToken: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(),
       bodyBgToken: getComputedStyle(document.body).getPropertyValue('--bg').trim(),
-      layoutMarginLeft: layout ? getComputedStyle(layout).marginLeft : null,
       mainShellPaddingRight: mainShell ? getComputedStyle(mainShell).paddingRight : null,
       mainMargin: main ? getComputedStyle(main).margin : null,
       mainPadding: main ? getComputedStyle(main).padding : null,
@@ -3228,13 +3461,12 @@ test('work reports and object dossiers download authenticated PDF files', async 
   expect(printState.pathname).toBe('/objects/7');
   expect(printState.printMediaMatches).toBe(true);
   expect(printState.hiddenControlsAreHidden).toBe(true);
-  expect(printState.sidebarIsHidden).toBe(true);
+  expect(printState.sidebarAbsent).toBe(true);
   await expect(page.getByTestId('risk-plain-summary')).toBeVisible();
   expect(printState.bodyBackground).toBe('rgb(255, 255, 255)');
   expect(printState.bodyColor).toBe('rgb(0, 0, 0)');
   expect(printState.rootBgToken).toBe('#fff');
   expect(printState.bodyBgToken).toBe('#fff');
-  expect(printState.layoutMarginLeft).toBe('0px');
   expect(printState.mainShellPaddingRight).toBe('0px');
   expect(printState.mainMargin).toBe('0px');
   expect(printState.mainPadding).toBe('0px');

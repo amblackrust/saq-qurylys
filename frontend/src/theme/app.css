@@ -49,6 +49,7 @@
   --color-zone-yellow-bg: var(--zone-yellow-bg);
   --color-zone-yellow-ink: var(--zone-yellow-ink);
   --color-zone-red: var(--zone-red);
+  --color-zone-red-action-ink: var(--zone-red-action-ink);
   --color-zone-red-bg: var(--zone-red-bg);
   --color-zone-red-ink: var(--zone-red-ink);
   --color-zone-none: var(--zone-none);

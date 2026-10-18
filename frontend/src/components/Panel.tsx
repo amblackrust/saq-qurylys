@@ -16,7 +16,7 @@ interface Props {
 /** Shared content surface with an optional heading and actions. */
 export function Panel({ title, actions, children, flush, className, style, id }: Props) {
   return (
-    <section id={id} className={cn('min-w-0 rounded-2xl border border-border bg-surface shadow-1', className)} style={style}>
+    <section id={id} className={cn('min-w-0 rounded-[clamp(1.1rem,1.8vw,1.7rem)] border border-border bg-surface shadow-1', className)} style={style}>
       {(title || actions) && (
         <header className="flex min-h-14 flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-3">
           {title && <h3 className="text-base font-semibold tracking-tight text-text">{title}</h3>}

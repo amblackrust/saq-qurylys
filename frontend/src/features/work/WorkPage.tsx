@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { IconChevronRight } from '@tabler/icons-react';
+import { IconArrowUpRight, IconChevronDown, IconChevronRight } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 import { useDashboard } from '@/api/hooks/objects';
@@ -8,9 +8,11 @@ import { useSignals } from '@/api/hooks/signals';
 import type { SignalRow, SignalStatus } from '@/api/types';
 import { useAuth } from '@/auth/useAuth';
 import { ErrorBlock, LoadingBlock } from '@/components/QueryState';
+import { ZoneBadge } from '@/components/Zone';
 import { ReportCard } from './ReportCard';
 import { MyAssignments } from './MyAssignments';
 import { AdminOverview } from './AdminOverview';
+import './work.css';
 
 type QueueStatus = Exclude<SignalStatus, 'closed'>;
 type SignalQuery = ReturnType<typeof useSignals>;
@@ -37,7 +39,7 @@ function SignalLink({ row, language }: { row: SignalRow; language: string }) {
     <Link
       to={`/signals/${row.id}`}
       aria-label={`${t('work.openCard')}: ${row.number}, ${row.object_name}`}
-      className="flex min-h-14 items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-base text-text no-underline transition-colors hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus"
+      className="work-signal-link flex min-h-14 items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-base text-text no-underline transition-colors hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus"
     >
       <span className="min-w-0">
         <span className="block font-semibold tabular-nums">{row.number}</span>
@@ -133,135 +135,194 @@ function MioWorkPage() {
         ? t('work.checkAds')
         : undefined;
   const redObjects = dashboard.data?.objects.filter((object) => object.zone === 'red').slice(0, 3) ?? [];
+  const assignmentState = assignments.isPending
+    ? 'loading'
+    : assignments.isError
+      ? 'error'
+      : (assignments.data?.items.length ?? 0) > 0
+        ? 'has-items'
+        : 'empty';
+  const hasAssignmentCard = canEditRegistry && assignmentState === 'has-items';
+  const showInlineAssignmentStatus = canEditRegistry && !hasAssignmentCard;
 
   return (
-    <div className="space-y-6">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div className="max-w-3xl space-y-1.5">
+    <div
+      className={`work-page ${hasAssignmentCard ? 'work-page--has-assignments' : 'work-page--compact'} ${primaryHref === '/ads?queue=true' ? 'work-page--no-ads' : ''}`}
+    >
+      <header className="work-page__intro">
+        <div className="work-page__intro-copy">
           <h1>{t('work.title')}</h1>
-          <p className="m-0 max-w-2xl text-base leading-6 text-text-2">
-            {t('work.intro')}
-          </p>
+          <p className="m-0 max-w-3xl text-base leading-6 text-text-2">{t('work.intro')}</p>
         </div>
-        {primaryHref && primaryLabel && (
-          <Link
-            to={primaryHref}
-            className="inline-flex min-h-12 items-center justify-center rounded-lg bg-primary px-5 text-base font-semibold text-primary-foreground no-underline transition-colors hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-focus"
-          >
-            {primaryLabel}
-          </Link>
-        )}
-        {primaryHref !== '/ads?queue=true' && (
-          <Link to="/ads?queue=true" className="inline-flex min-h-11 items-center text-sm text-link hover:underline">
-            {t('work.adsQueueLink')}
-          </Link>
-        )}
       </header>
 
-      {canEditRegistry && <MyAssignments query={assignments} />}
-
-      <div className="space-y-6">
-        <section aria-labelledby="work-queues-title" className="min-w-0">
-          <div className="mb-3 flex items-end justify-between gap-3 border-b border-border pb-3">
-            <h2 id="work-queues-title" className="mb-0 text-xl font-semibold">
-              {t('work.queuesTitle')}
-            </h2>
-          </div>
-          <p className="mb-3 -mt-1 text-sm text-text-2">{t('work.territorialQueueNote')}</p>
-          {selectedQueue ? (
-            <div className="grid min-w-0 items-start overflow-hidden rounded-xl border border-border bg-surface lg:grid-cols-[16rem_minmax(0,1fr)]">
-              <nav aria-label={t('work.queuesTitle')} className="grid grid-cols-1 gap-2 border-b border-border p-2 sm:grid-cols-2 sm:p-3 lg:grid-cols-1 lg:gap-1 lg:border-r lg:border-b-0">
-                {visibleQueues.map(({ status, title, query }) => (
-                  <button
-                    key={status}
-                    type="button"
-                    aria-pressed={selectedQueue.status === status}
-                    onClick={() => setRequestedStatus(status)}
-                    className={`flex min-h-12 min-w-0 items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${selectedQueue.status === status ? 'bg-hover text-text' : 'text-text-2'}`}
-                  >
-                    <span className="min-w-0 whitespace-normal">{title}</span>
-                    <span className="shrink-0 tabular-nums text-text-3">
-                      {query.data ? query.data.total : query.isError ? '!' : '—'}
-                    </span>
-                  </button>
-                ))}
-              </nav>
-              <div className="min-w-0 px-4 sm:px-5" aria-live="polite">
-                {selectedQueue.query.isError ? (
-                  <ErrorBlock error={selectedQueue.query.error} onRetry={() => void selectedQueue.query.refetch()} />
-                ) : selectedQueue.query.isPending || selectedQueue.query.isFetching ? (
-                  <LoadingBlock label={t('work.loadingSignals')} />
-                ) : (
-                  <>
-                    <ul className="m-0 list-none divide-y divide-border p-0">
-                      {selectedQueue.query.data?.items.map((row) => (
-                        <li key={row.id}>
-                          <SignalLink row={row} language={i18n.resolvedLanguage ?? i18n.language} />
-                        </li>
-                      ))}
-                    </ul>
-                    {(selectedQueue.query.data?.total ?? 0) > (selectedQueue.query.data?.items.length ?? 0) && (
-                      <Link
-                        to={`/signals?status=${selectedQueue.status}`}
-                        className="my-2 inline-flex min-h-11 items-center px-2 text-sm text-link hover:underline"
-                      >
-                        {t('work.openAll')}
-                      </Link>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3">
-              <p className="m-0 text-sm text-text-2">{t('work.emptyQueue')}</p>
-              <Link to="/signals" className="inline-flex min-h-11 items-center text-sm text-link hover:underline">
-                {t('work.openAll')}
-              </Link>
-            </div>
+      <section className="work-card work-card--next" aria-labelledby="work-next-title" data-testid="work-next-card">
+        <h2 id="work-next-title">{t('work.nextActionTitle')}</h2>
+        <div className="work-next__content">
+          {primaryHref && primaryLabel ? (
+            <Link
+              to={primaryHref}
+              data-testid="work-primary-action"
+              className="work-next__action inline-flex min-h-12 items-center justify-between gap-4 rounded-xl bg-primary px-4 py-3 text-base font-semibold text-primary-foreground no-underline transition-colors hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-focus"
+            >
+              <span>{primaryLabel}</span>
+              <IconArrowUpRight className="size-5 flex-none" aria-hidden />
+            </Link>
+          ) : assignments.isError && !canEditRegistry ? (
+            <ErrorBlock error={assignments.error} onRetry={() => void assignments.refetch()} />
+          ) : failedQueues[0] ? (
+            <ErrorBlock error={failedQueues[0].query.error} onRetry={() => void failedQueues[0].query.refetch()} />
+          ) : assignments.isPending && !canEditRegistry ? (
+            <LoadingBlock label={t('work.loadingAssignments')} />
+          ) : loadingQueues ? (
+            <LoadingBlock label={t('work.loadingSignals')} />
+          ) : assignments.isError ? null : (
+            <p className="work-next__empty">{t('work.emptyQueue')}</p>
           )}
-        </section>
-
-        <section className="min-w-0" aria-labelledby="work-red-objects-title">
-          <div className="border-b border-border pb-3">
-            <h2 id="work-red-objects-title" className="mb-0 text-xl font-semibold">
-              {t('work.redObjectsTitle')}
-            </h2>
-            <p className="mb-0 mt-1.5 text-sm leading-5 text-text-2">{t('work.redObjectsNote')}</p>
+        </div>
+        {showInlineAssignmentStatus && (
+          <div
+            className="work-assignments-status"
+            data-assignment-state={assignmentState}
+            data-testid="work-assignments-card"
+          >
+            <MyAssignments query={assignments} />
           </div>
+        )}
+      </section>
 
-          <div className="rounded-xl border border-border bg-surface px-3 sm:px-4">
-            {dashboard.isError ? (
-              <ErrorBlock error={dashboard.error} onRetry={() => void dashboard.refetch()} />
-            ) : dashboard.isPending ? (
-              <LoadingBlock label={t('work.loadingDashboard')} />
-            ) : redObjects.length > 0 ? (
-              <ul className="m-0 grid list-none gap-x-4 divide-y divide-border p-0 sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-3">
-                {redObjects.map((object) => (
-                  <li key={object.id} className="border-border sm:border-t">
+      {hasAssignmentCard && (
+        <div
+          className="work-card work-card--assignments"
+          data-assignment-state={assignmentState}
+          data-testid="work-assignments-card"
+        >
+          <MyAssignments query={assignments} />
+        </div>
+      )}
+
+      <section className="work-card work-card--signals" aria-labelledby="work-queues-title" data-testid="work-signals-card">
+        <header className="work-card__heading">
+          <h2 id="work-queues-title">{t('work.queuesTitle')}</h2>
+          <p className="m-0 text-sm leading-5 text-text-2">{t('work.territorialQueueNote')}</p>
+        </header>
+        {selectedQueue ? (
+          <div className="work-signals__layout">
+            <nav aria-label={t('work.queuesTitle')} className="work-signals__tabs">
+              {visibleQueues.map(({ status, title, query }) => (
+                <button
+                  key={status}
+                  type="button"
+                  data-testid={`work-signal-status-${status}`}
+                  aria-pressed={selectedQueue.status === status}
+                  onClick={() => setRequestedStatus(status)}
+                  className={`work-signals__tab flex min-h-12 min-w-0 items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${selectedQueue.status === status ? 'is-selected' : ''}`}
+                >
+                  <span className="min-w-0 whitespace-normal">{title}</span>
+                  <span className="shrink-0 tabular-nums" aria-label={query.isError ? t('states.loadError') : undefined}>
+                    {query.data ? query.data.total : query.isError ? '!' : '—'}
+                  </span>
+                </button>
+              ))}
+            </nav>
+            <div
+              className="work-signals__items min-w-0"
+              data-testid="work-signal-details"
+              aria-live="polite"
+              aria-busy={selectedQueue.query.isPending || selectedQueue.query.isFetching}
+            >
+              {selectedQueue.query.isError ? (
+                <ErrorBlock error={selectedQueue.query.error} onRetry={() => void selectedQueue.query.refetch()} />
+              ) : selectedQueue.query.isPending || selectedQueue.query.isFetching ? (
+                <LoadingBlock label={t('work.loadingSignals')} />
+              ) : (
+                <>
+                  <ul className="m-0 list-none divide-y divide-border p-0">
+                    {selectedQueue.query.data?.items.map((row) => (
+                      <li key={row.id}>
+                        <SignalLink row={row} language={i18n.resolvedLanguage ?? i18n.language} />
+                      </li>
+                    ))}
+                  </ul>
+                  {(selectedQueue.query.data?.total ?? 0) > (selectedQueue.query.data?.items.length ?? 0) && (
                     <Link
-                      to={`/objects/${object.id}`}
-                      className="flex min-h-14 items-center justify-between gap-3 py-2.5 text-base text-text no-underline hover:text-accent-text focus-visible:ring-2 focus-visible:ring-focus"
+                      to={`/signals?status=${selectedQueue.status}`}
+                      className="my-2 inline-flex min-h-11 items-center px-2 text-sm text-link hover:underline"
                     >
-                      <span className="min-w-0 truncate">{object.name}</span>
-                      <IconChevronRight className="size-4 flex-none text-text-3" aria-hidden />
+                      {t('work.openAll')}
                     </Link>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="my-3 text-sm text-text-2">{t('work.noRedObjects')}</p>
-            )}
+                  )}
+                </>
+              )}
+            </div>
           </div>
+        ) : (
+          <div className="work-signals__empty">
+            <p className="m-0 text-sm text-text-2">{t('work.emptyQueue')}</p>
+            <Link to="/signals" className="inline-flex min-h-11 items-center text-sm text-link hover:underline">
+              {t('work.openAll')}
+            </Link>
+          </div>
+        )}
+      </section>
 
-          <Link to="/objects" className="inline-flex min-h-11 items-center text-sm text-link hover:underline">
-            {t('work.openObjects')}
+      <section className="work-card work-card--objects" aria-labelledby="work-red-objects-title" data-testid="work-objects-card">
+        <header className="work-card__heading">
+          <h2 id="work-red-objects-title">{t('work.redObjectsTitle')}</h2>
+          <p className="m-0 text-sm leading-5 text-text-2">{t('work.redObjectsNote')}</p>
+        </header>
+        <div className="work-objects__list">
+          {dashboard.isError ? (
+            <ErrorBlock error={dashboard.error} onRetry={() => void dashboard.refetch()} />
+          ) : dashboard.isPending ? (
+            <LoadingBlock label={t('work.loadingDashboard')} />
+          ) : redObjects.length > 0 ? (
+            <ul className="m-0 grid list-none gap-x-4 divide-y divide-border p-0">
+              {redObjects.map((object) => (
+                <li key={object.id} className="border-border">
+                  <Link
+                    to={`/objects/${object.id}`}
+                    className="work-object-link flex min-h-14 items-center justify-between gap-3 py-2.5 text-base text-text no-underline focus-visible:ring-2 focus-visible:ring-focus"
+                  >
+                    <span className="flex min-w-0 flex-col gap-1">
+                      <span className="min-w-0 [overflow-wrap:anywhere]">{object.name}</span>
+                      <ZoneBadge zone={object.zone} />
+                    </span>
+                    <IconChevronRight className="size-4 flex-none text-text-3" aria-hidden />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="my-3 text-sm text-text-2">{t('work.noRedObjects')}</p>
+          )}
+        </div>
+        <Link to="/objects" className="work-card__text-link inline-flex min-h-11 items-center text-sm hover:underline">
+          {t('work.openObjects')}
+        </Link>
+      </section>
+
+      {primaryHref !== '/ads?queue=true' && (
+        <section className="work-card work-card--ads" aria-labelledby="work-ads-title" data-testid="work-ads-card">
+          <p className="work-card__eyebrow">{t('work.adsQueueLink')}</p>
+          <h2 id="work-ads-title">{t('nav.ads')}</h2>
+          <p className="m-0 text-base leading-6">{t('ads:subtitle')}</p>
+          <Link
+            to="/ads?queue=true"
+            className="work-ads__action inline-flex min-h-12 items-center justify-between gap-3 rounded-xl px-4 py-3 text-base font-semibold no-underline focus-visible:ring-2 focus-visible:ring-focus"
+          >
+            <span>{t('work.adsQueueLink')}</span>
+            <IconArrowUpRight className="size-5 flex-none" aria-hidden />
           </Link>
         </section>
-      </div>
-      <details className="rounded-xl border border-border bg-surface px-4 py-3">
-        <summary className="min-h-11 cursor-pointer py-2 font-medium">{t('work.openReport')}</summary>
-        <div className="pt-3"><ReportCard /></div>
+      )}
+
+      <details className="work-card work-card--report" data-testid="work-report-card">
+        <summary className="work-report__summary">
+          <span>{t('work.openReport')}</span>
+          <IconChevronDown className="work-report__chevron size-5 flex-none" aria-hidden />
+        </summary>
+        <div className="work-report__content"><ReportCard /></div>
       </details>
     </div>
   );
