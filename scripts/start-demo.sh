@@ -48,7 +48,7 @@ docker compose up --build --detach --wait --wait-timeout 600
 printf 'Seeding demo data if the database is empty. Existing data and account passwords are preserved.\n'
 docker compose exec -T api python -m app.seed --demo --if-empty
 
-admin_username="$(docker compose exec -T api python -c 'from app.config import settings; print(settings.initial_admin_username.strip().lower())')" \
+admin_username="$(docker compose exec -T api python -c 'from app.config import get_settings; print(get_settings().initial_admin_username.strip().lower())')" \
     || fail 'Could not read the configured initial admin username from the API container.'
 [[ -n "$admin_username" ]] || fail 'INITIAL_ADMIN_USERNAME is empty in the API container.'
 
