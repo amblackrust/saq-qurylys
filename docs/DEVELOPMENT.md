@@ -54,6 +54,8 @@ already exists and remove only their own buckets and object versions at session 
 `TEST_DATABASE_URL` must be exactly the same parsed URL, including driver, host, port, database, username, password
 and query parameters. Set `TEST_DATABASE_URL` along with `DATABASE_URL`, `TEST_S3_BUCKET`, `TEST_S3_BUCKET_VISION`,
 `S3_ENDPOINT`, `S3_ACCESS_KEY`, and `S3_SECRET_KEY` when overriding the defaults.
+All test Redis clients use `TEST_REDIS_URL`, which defaults to `redis://localhost:6379/15`; set it to the isolated
+Redis host, port, and database when testing against a separate stack.
 Every test runs in a rolled-back transaction. The Celery hook `app.events.object_changed` is disabled in tests
 (`EVENTS_ENABLED=false`).
 

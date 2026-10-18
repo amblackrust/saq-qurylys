@@ -21,8 +21,8 @@ from app.bot.ratelimit import RateLimiter
 from app.models import AdPost, Complaint, Evidence, Notification
 from app.models.enums import AdOrigin, CaptureStatus, ComplaintSource, Platform
 from tests.conftest import PNG_BYTES, World, make_object
+from tests.support_collect import TEST_REDIS_URL
 
-REDIS_URL = "redis://localhost:6379/0"
 USER_ID = 500
 CHANNEL = {"id": -1001, "type": "channel", "title": "Новостройки", "username": "novostroyki_vko"}
 
@@ -120,7 +120,7 @@ def harness(db: Session, bucket: str, monkeypatch: pytest.MonkeyPatch) -> Iterat
     bot = Bot("123456:TEST-TOKEN")
     bot._bot_user = User(id=1, first_name="SAQ", is_bot=True, username="saq_test_bot")  # what `get_me` would set
     application = Application.builder().bot(bot).build()
-    client = Redis.from_url(REDIS_URL)
+    client = Redis.from_url(TEST_REDIS_URL)
     prefix = f"test-bot-handlers-{id(application)}:"
     secret = "test-secret-test-secret-test-secret-0123456789"
     application.bot_data["limiter"] = RateLimiter(client, secret, 100, prefix)

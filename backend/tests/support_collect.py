@@ -1,5 +1,6 @@
 """Support for the tests that run the collection: its locks live in Redis."""
 
+import os
 from collections.abc import Iterator
 
 import pytest
@@ -7,8 +8,8 @@ from redis import Redis
 
 from app.config import get_settings
 
-# The development Redis (database 0) also serves the running stack: the tests use another database, emptied after.
-TEST_REDIS_URL = "redis://localhost:6379/15"
+# Use one configurable URL for every test Redis client, including the collection locks.
+TEST_REDIS_URL = os.environ.get("TEST_REDIS_URL", "redis://localhost:6379/15")
 
 
 def lock_db() -> Redis:

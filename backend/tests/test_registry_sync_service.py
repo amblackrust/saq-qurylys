@@ -2,7 +2,7 @@ import hashlib
 import json
 import re
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +23,7 @@ from app.modules.registry_sync.service import LAST_SYNC_KEY, sync_homeportal
 from tests.conftest import World, auth
 
 FIXTURES = Path(__file__).parent / "fixtures" / "homeportal"
+SYNC_DATE = date(2026, 10, 14)
 ALL_IDS = [1505, 1452, 1428, 1398, 1375, 1331, 1330, 1329, 1241, 1218, 1141, 1077, 1027, 953, 807]
 DETAIL_URL = re.compile(r"/api/v1/objects-detail/(\d+)$")
 
@@ -75,7 +76,11 @@ def portal() -> FakePortal:
 
 
 @pytest.fixture
-def ready(db: Session) -> Session:
+def ready(db: Session, monkeypatch: pytest.MonkeyPatch) -> Session:
+    monkeypatch.setattr(
+        "app.modules.registry_sync.service.local_today",
+        lambda _territory: SYNC_DATE,
+    )
     seed.seed_reference(db)
     seed.load_districts(db)
     return db

@@ -37,8 +37,7 @@ from app.models.enums import (
 from app.modules.ads import service as ads_service
 from tests.conftest import PNG_BYTES, World, make_object
 from tests.support_ads import add_ad
-
-REDIS_URL = "redis://localhost:6379/0"
+from tests.support_collect import TEST_REDIS_URL
 
 
 @pytest.fixture
@@ -453,7 +452,7 @@ def test_texts_format_with_their_fields() -> None:
 
 @pytest.fixture
 def limiter() -> Iterator[RateLimiter]:
-    client = Redis.from_url(REDIS_URL)
+    client = Redis.from_url(TEST_REDIS_URL)
     prefix = f"test-bot-rate-{uuid4().hex}:"
     yield RateLimiter(client, "test-secret-test-secret-test-secret-0123456789", limit=3, prefix=prefix)
     for key in client.scan_iter(f"{prefix}*"):

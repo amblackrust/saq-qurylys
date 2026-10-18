@@ -1,6 +1,7 @@
 import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select, text
@@ -166,7 +167,7 @@ def test_list_filters_sorting_and_pagination(client: TestClient, db: Session, wo
 
 
 def test_stalled_key_status_detail(client: TestClient, db: Session, world: World) -> None:
-    since = datetime.now(UTC).date() - timedelta(days=45)
+    since = datetime.now(ZoneInfo(world.ust.timezone)).date() - timedelta(days=45)
     make_object(db, world.ust, "ЖК Стоит", key_status=KeyStatus.stalled, stalled_since=since)
     row = client.get("/api/v1/objects", headers=auth(world.users["mio_ust"])).json()["items"][0]
     assert row["key_status_detail"] == {"stalled_days": 45}

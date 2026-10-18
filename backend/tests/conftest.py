@@ -38,6 +38,7 @@ if _TEST_EVIDENCE_BUCKET == _TEST_VISION_BUCKET:
     raise RuntimeError("evidence and vision test bucket names must be different")
 os.environ["S3_BUCKET_EVIDENCE"] = _TEST_EVIDENCE_BUCKET
 os.environ["VISION_ENABLED"] = "true"
+os.environ["VISION_DETECTOR_BACKEND"] = "disabled"
 os.environ["ASSISTANT_ENABLED"] = "true"
 os.environ["S3_BUCKET_VISION"] = _TEST_VISION_BUCKET
 os.environ["EVIDENCE_LOCK_MODE"] = "GOVERNANCE"
@@ -45,8 +46,9 @@ os.environ["EVIDENCE_RETENTION_DAYS"] = "1"
 os.environ["TSA_URL"] = ""
 os.environ["JWT_SECRET"] = "test-secret-test-secret-test-secret-0123456789"
 os.environ["EVENTS_ENABLED"] = "false"
-# The development Redis (database 0) serves the running stack; tests use database 15 (tests/support_collect.py).
-os.environ["REDIS_URL"] = "redis://localhost:6379/15"
+# Tests use their isolated Redis database 15; configure the endpoint from outside the test process.
+os.environ.setdefault("TEST_REDIS_URL", "redis://localhost:6379/15")
+os.environ["REDIS_URL"] = os.environ["TEST_REDIS_URL"]
 os.environ["LLM_ENABLED"] = "false"
 # The developer's .env may switch real collectors on; tests register their own and never reach the network.
 os.environ["HOMEPORTAL_SYNC_ENABLED"] = "false"
