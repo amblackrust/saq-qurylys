@@ -23,6 +23,9 @@ from app.models.enums import (
     Platform,
 )
 from app.modules.ads import service
+from app.modules.risk import engine as risk_engine
+from app.modules.risk import service as risk_service
+from app.modules.settings.service import load_settings
 from app.storage import EvidenceLink
 from tests.conftest import PDF_BYTES, PNG_BYTES, World, auth, make_object
 from tests.support_ads import add_ad
@@ -375,6 +378,119 @@ def test_irrelevant_triage_allows_unknown_but_blocks_confirmed_facts_and_links(
     blocked_link = client.patch(f"{ADS}/{linked.id}/triage", headers=headers, json={"state": "irrelevant"})
     assert blocked_link.status_code == 409
     assert blocked_link.json()["detail"]["code"] == "irrelevant_has_facts"
+
+
+def test_confirming_a_link_reopens_irrelevant_ad_and_keeps_its_risk_facts(
+    client: TestClient, db: Session, world: World
+) -> None:
+    obj = make_object(db, world.ust)
+    ad = add_ad(
+        db,
+        world.ust,
+        "Внесите задаток, готовность 80%",
+        payment_schemes=["deposit"],
+        claimed_readiness_pct=80,
+    )
+    headers = auth(world.users["mio_ust"])
+    note = "Публикация не относится к объектам"
+    triaged = client.patch(
+        f"{ADS}/{ad.id}/triage", headers=headers, json={"state": "irrelevant", "note": note}
+    )
+    assert triaged.status_code == 200 and triaged.json()["review_state"] == "irrelevant"
+
+    response = client.patch(f"{ADS}/{ad.id}", headers=headers, json={"object_id": obj.id})
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert (body["object_id"], body["link_method"], body["link_confidence"], body["status"]) == (
+        obj.id,
+        "manual",
+        1.0,
+        "captured",
+    )
+    assert body["review_state"] == "unreviewed"
+    assert (body["reviewed_by"], body["reviewed_at"], body["review_note"]) == (None, None, None)
+    assert body["payment_schemes"] == ["deposit"] and body["claimed_readiness_pct"] == 80
+
+    db.refresh(obj)
+    assert obj.readiness_claimed_pct == 80
+    now = datetime.now(UTC)
+    settings = load_settings(db)
+    scoring_input = risk_service.load_scoring_input(db, obj, settings, now, now.date())
+    facts = risk_engine.compute_facts(scoring_input, settings, now.date())
+    assert facts.outcomes[risk_engine.R2].triggered
+    assert facts.outcomes[risk_engine.R2].detail["payment_schemes"] == ["deposit"]
+    assert facts.outcomes[risk_engine.R5].detail["claimed_pct"] == 80
+
+    audit = db.scalars(select(AuditLog).where(AuditLog.action == "ad.update", AuditLog.entity_id == ad.id)).one()
+    assert audit.before["review_state"] == "irrelevant" and audit.before["review_note"] == note
+    assert audit.after["review_state"] == "unreviewed"
+    assert (audit.after["reviewed_by"], audit.after["reviewed_at"], audit.after["review_note"]) == (None, None, None)
+
+
+def test_manually_selecting_a_tentative_link_reopens_even_if_status_stays_verification(
+    client: TestClient, db: Session, world: World
+) -> None:
+    obj = make_object(db, world.ust)
+    ad = add_ad(
+        db,
+        world.ust,
+        "tentative link",
+        object_id=obj.id,
+        link_method=LinkMethod.name,
+        link_confidence=0.75,
+        status=AdStatus.verification,
+    )
+    headers = auth(world.users["mio_ust"])
+    client.patch(f"{ADS}/{ad.id}/triage", headers=headers, json={"state": "irrelevant", "note": "На проверке"})
+
+    response = client.patch(f"{ADS}/{ad.id}", headers=headers, json={"object_id": obj.id, "status": "verification"})
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert (body["object_id"], body["link_method"], body["status"]) == (obj.id, "manual", "verification")
+    assert body["review_state"] == "unreviewed" and body["review_note"] is None
+
+
+@pytest.mark.parametrize(
+    "patch",
+    [
+        pytest.param({"payment_schemes": ["deposit"]}, id="payment-scheme"),
+        pytest.param({"claimed_readiness_pct": 80}, id="claimed-readiness"),
+        pytest.param({"price_before_completion": True}, id="early-price"),
+    ],
+)
+def test_adding_manual_risk_facts_reopens_an_irrelevant_ad(
+    client: TestClient, db: Session, world: World, patch: dict[str, object]
+) -> None:
+    ad = add_ad(db, world.ust, "ручное изменение")
+    headers = auth(world.users["mio_ust"])
+    note = "Текущая заметка triage"
+    client.patch(f"{ADS}/{ad.id}/triage", headers=headers, json={"state": "irrelevant", "note": note})
+
+    response = client.patch(f"{ADS}/{ad.id}", headers=headers, json=patch)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["review_state"] == "unreviewed"
+    assert response.json()["review_note"] is None
+    audit = db.scalars(select(AuditLog).where(AuditLog.action == "ad.update", AuditLog.entity_id == ad.id)).one()
+    assert audit.before["review_note"] == note and audit.after["review_note"] is None
+
+
+def test_unchanged_manual_risk_facts_do_not_reopen_an_irrelevant_ad(
+    client: TestClient, db: Session, world: World
+) -> None:
+    ad = add_ad(db, world.ust, "без изменений", payment_schemes=["deposit"], claimed_readiness_pct=80)
+    headers = auth(world.users["mio_ust"])
+    note = "Заметка triage"
+    client.patch(f"{ADS}/{ad.id}/triage", headers=headers, json={"state": "irrelevant", "note": note})
+
+    response = client.patch(
+        f"{ADS}/{ad.id}", headers=headers, json={"payment_schemes": ["deposit"], "claimed_readiness_pct": 80}
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["review_state"] == "irrelevant" and response.json()["review_note"] == note
 
 
 def test_detail_has_hits_evidence_llm_and_linked_object(
@@ -883,6 +999,45 @@ def test_confirming_a_hit_recomputes_weights_and_recalculates_the_object(
     assert installment.confirmed is None
 
 
+def test_confirming_a_hit_reopens_an_irrelevant_ad_and_audits_the_ad_state(
+    client: TestClient, db: Session, world: World
+) -> None:
+    ad = add_ad(db, world.ust, "Бронь квартиры")
+    phrase_hit = hit(db, ad, PhraseCategory.booking, 0, 5)
+    user = world.users["mio_ust"]
+    headers = auth(user)
+    note = "Пока не относится"
+    client.patch(f"{ADS}/{ad.id}/triage", headers=headers, json={"state": "irrelevant", "note": note})
+
+    response = client.post(f"{ADS}/{ad.id}/hits/{phrase_hit.id}/confirm", headers=headers, json={"confirmed": True})
+
+    assert response.status_code == 200 and response.json()["confirmed"] is True
+    db.refresh(ad)
+    assert ad.review_state is AdReviewState.unreviewed
+    assert (ad.reviewed_by, ad.reviewed_at, ad.review_note) == (None, None, None)
+    audit = db.scalars(
+        select(AuditLog).where(
+            AuditLog.action == "ad.confirm_hit", AuditLog.entity_type == "ad_post", AuditLog.entity_id == ad.id
+        )
+    ).one()
+    assert audit.before["review_state"] == "irrelevant" and audit.before["review_note"] == note
+    assert audit.after["review_state"] == "unreviewed" and audit.after["review_note"] is None
+
+
+def test_rejecting_a_hit_does_not_reopen_an_irrelevant_ad(client: TestClient, db: Session, world: World) -> None:
+    ad = add_ad(db, world.ust, "Бронь квартиры")
+    phrase_hit = hit(db, ad, PhraseCategory.booking, 0, 5)
+    headers = auth(world.users["mio_ust"])
+    note = "Оставить без разбора"
+    client.patch(f"{ADS}/{ad.id}/triage", headers=headers, json={"state": "irrelevant", "note": note})
+
+    response = client.post(f"{ADS}/{ad.id}/hits/{phrase_hit.id}/confirm", headers=headers, json={"confirmed": False})
+
+    assert response.status_code == 200 and response.json()["confirmed"] is False
+    db.refresh(ad)
+    assert ad.review_state is AdReviewState.irrelevant and ad.review_note == note
+
+
 def test_confirm_hit_of_another_post_or_territory_is_not_found(client: TestClient, db: Session, world: World) -> None:
     ad = add_ad(db, world.ust, "Бронь")
     other = add_ad(db, world.ust, "Бронь")
@@ -951,6 +1106,38 @@ def test_accept_llm_moves_the_extraction_into_confirmed_fields(
 
     again = client.post(f"{ADS}/{ad.id}/accept-llm", headers=auth(user))
     assert again.status_code == 200 and again.json()["payment_schemes"] == ["installment", "deposit"]
+
+
+def test_accepting_llm_facts_reopens_an_irrelevant_ad_and_audits_it(
+    client: TestClient, db: Session, world: World
+) -> None:
+    text = "Внесите задаток, готовность 80%"
+    ad = add_ad(
+        db,
+        world.ust,
+        text,
+        llm_status=LlmStatus.done,
+        llm_extraction={
+            "findings": [{"category": "deposit", "quote": "задаток", "confidence": 0.9}],
+            "payment_schemes": ["deposit"],
+            "claimed_readiness_pct": 80,
+            "price_before_completion": False,
+            "confidence": 0.9,
+        },
+    )
+    user = world.users["mio_ust"]
+    headers = auth(user)
+    note = "Ожидание решения"
+    client.patch(f"{ADS}/{ad.id}/triage", headers=headers, json={"state": "irrelevant", "note": note})
+
+    response = client.post(f"{ADS}/{ad.id}/accept-llm", headers=headers)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["review_state"] == "unreviewed"
+    assert response.json()["payment_schemes"] == ["deposit"] and response.json()["claimed_readiness_pct"] == 80
+    audit = db.scalars(select(AuditLog).where(AuditLog.action == "ad.accept_llm", AuditLog.entity_id == ad.id)).one()
+    assert audit.before["review_state"] == "irrelevant" and audit.before["review_note"] == note
+    assert audit.after["review_state"] == "unreviewed" and audit.after["review_note"] is None
 
 
 @pytest.mark.parametrize(

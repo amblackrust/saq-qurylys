@@ -15,6 +15,7 @@ from app.config import get_settings
 from app.models import AdPost, ConstructionObject, Developer, LinkedEntity, Phrase, PhraseHit, SourceAccount, Territory
 from app.models.enums import (
     AdOrigin,
+    AdReviewState,
     AdStatus,
     DetectedBy,
     LinkedEntityKind,
@@ -242,7 +243,18 @@ def link_ad(session: Session, ad: AdPost) -> tuple[int | None, int | None]:
 
     Returns (previous object id, current object id).
     """
+    ad_id = ad.id
+    # Keep earlier work on this row and refresh it after acquiring the lock used by manual triage.
+    session.flush()
+    locked_ad = session.scalar(
+        select(AdPost).where(AdPost.id == ad_id).with_for_update().execution_options(populate_existing=True)
+    )
+    if locked_ad is None:
+        return ad.object_id, ad.object_id
+    ad = locked_ad
     previous = ad.object_id
+    if ad.review_state is AdReviewState.irrelevant:
+        return previous, previous
     if ad.link_method is LinkMethod.manual:
         return previous, previous
     threshold = load_settings(session).link_confidence_threshold

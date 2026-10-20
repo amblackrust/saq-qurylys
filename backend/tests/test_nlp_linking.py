@@ -4,10 +4,11 @@ when all of them are found."""
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
-from app.models import SourceAccount
-from app.models.enums import AdOrigin, AdStatus, LinkMethod, Platform
+from app.models import AdPost, SourceAccount
+from app.models.enums import AdOrigin, AdReviewState, AdStatus, LinkMethod, Platform
 from app.modules.nlp import service
 from app.modules.settings.service import save_settings
 from tests.conftest import World, make_object
@@ -106,6 +107,51 @@ def test_a_post_nobody_reviewed_needs_a_person_to_confirm_a_guessed_link(
     service.link_ad(db, ad)
 
     assert (ad.object_id, ad.link_method, ad.status) == (obj.id, LinkMethod.name, AdStatus.verification)
+
+
+def test_background_linking_preserves_irrelevant_unlinked_and_tentative_posts(
+    db: Session, world: World
+) -> None:
+    obj = make_object(db, world.ust, "Жилой комплекс Нур Плаза")
+    unlinked = add_ad(
+        db,
+        world.ust,
+        "Нур Плаза: старт продаж",
+        origin=AdOrigin.manual,
+    )
+    db.execute(
+        update(AdPost)
+        .where(AdPost.id == unlinked.id)
+        .values(review_state=AdReviewState.irrelevant)
+        .execution_options(synchronize_session=False)
+    )
+    assert unlinked.review_state is AdReviewState.unreviewed
+    tentative = add_ad(
+        db,
+        world.ust,
+        "Нур Плаза: старт продаж",
+        origin=AdOrigin.manual,
+        object_id=obj.id,
+        link_method=LinkMethod.name,
+        link_confidence=0.75,
+        status=AdStatus.verification,
+        review_state=AdReviewState.irrelevant,
+    )
+
+    assert service.link_ad(db, unlinked) == (None, None)
+    assert (unlinked.object_id, unlinked.link_method, unlinked.link_confidence, unlinked.status) == (
+        None,
+        None,
+        None,
+        AdStatus.captured,
+    )
+    assert service.link_ad(db, tentative) == (obj.id, obj.id)
+    assert (tentative.object_id, tentative.link_method, tentative.link_confidence, tentative.status) == (
+        obj.id,
+        LinkMethod.name,
+        0.75,
+        AdStatus.verification,
+    )
 
 
 def test_a_collected_post_of_an_account_bound_by_staff_counts_at_once(db: Session, world: World) -> None:

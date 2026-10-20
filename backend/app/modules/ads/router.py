@@ -365,14 +365,29 @@ def _confirmed_status(ad: AdPost) -> AdStatus:
     return AdStatus.removed_saved if ad.removed_detected_at is not None else AdStatus.captured
 
 
+def _reopen_irrelevant_for_new_fact(ad: AdPost, *, introduced_fact: bool) -> bool:
+    if not introduced_fact or ad.review_state is not AdReviewState.irrelevant:
+        return False
+    ad.review_state = AdReviewState.unreviewed
+    ad.reviewed_by = None
+    ad.reviewed_at = None
+    ad.review_note = None
+    return True
+
+
 @router.patch("/ads/{ad_id}", response_model=AdDetail)
 def update_ad(
     ad_id: int, body: AdPatch, session: SessionDep, user: StaffUser, scope: ScopeDep, request: Request
 ) -> AdDetail:
-    ad = service.get_ad_in_scope(session, scope, ad_id)
+    ad = service.get_ad_in_scope(session, scope, ad_id, for_update=True)
     changes = body.model_dump(exclude_unset=True)
     before = audit.snapshot(ad)
+    manually_selected_object = "object_id" in changes and changes["object_id"] is not None
     previous_object_id = ad.object_id
+    previous_status = ad.status
+    previous_payment_schemes = set(ad.payment_schemes)
+    previous_claimed_readiness_pct = ad.claimed_readiness_pct
+    previous_price_before_completion = ad.price_before_completion
 
     if "object_id" in changes:
         new_object_id = changes.pop("object_id")
@@ -400,6 +415,28 @@ def update_ad(
     for field, value in changes.items():
         setattr(ad, field, value)
 
+    confirmed_link_added = ad.object_id is not None and (
+        manually_selected_object
+        or (
+            ad.status is not AdStatus.verification
+            and (ad.object_id != previous_object_id or previous_status is AdStatus.verification)
+        )
+    )
+    added_payment_scheme = bool(set(ad.payment_schemes) - previous_payment_schemes)
+    changed_claimed_readiness = (
+        ad.claimed_readiness_pct is not None and ad.claimed_readiness_pct != previous_claimed_readiness_pct
+    )
+    added_price_before_completion = ad.price_before_completion and not previous_price_before_completion
+    _reopen_irrelevant_for_new_fact(
+        ad,
+        introduced_fact=(
+            confirmed_link_added
+            or added_payment_scheme
+            or changed_claimed_readiness
+            or added_price_before_completion
+        ),
+    )
+
     session.flush()
     affected = [object_id for object_id in dict.fromkeys([previous_object_id, ad.object_id]) if object_id is not None]
     for object_id in affected:
@@ -415,16 +452,25 @@ def update_ad(
 def confirm_hit(
     ad_id: int, hit_id: int, body: HitConfirm, session: SessionDep, user: StaffUser, scope: ScopeDep, request: Request
 ) -> PhraseHitOut:
-    ad = service.get_ad_in_scope(session, scope, ad_id)
+    ad = service.get_ad_in_scope(session, scope, ad_id, for_update=True)
     hit = session.get(PhraseHit, hit_id)
     if hit is None or hit.ad_post_id != ad.id:
         raise api_error(404, "hit_not_found", "Формулировка в публикации не найдена")
+    was_confirmed = hit.confirmed is True
     before = audit.snapshot(hit)
+    ad_before = (
+        audit.snapshot(ad)
+        if body.confirmed and not was_confirmed and ad.review_state is AdReviewState.irrelevant
+        else None
+    )
     hit.confirmed = body.confirmed
     hit.confirmed_by = user.id
+    reopened = _reopen_irrelevant_for_new_fact(ad, introduced_fact=body.confirmed and not was_confirmed)
     session.flush()
     recompute_weights(session, ad)
     audit.record(session, user, "ad.confirm_hit", "phrase_hit", hit.id, before, audit.snapshot(hit), request)
+    if reopened and ad_before is not None:
+        audit.record(session, user, "ad.confirm_hit", "ad_post", ad.id, ad_before, audit.snapshot(ad), request)
     extraction = Extraction.model_validate(ad.llm_extraction) if ad.llm_extraction is not None else None
     result = PhraseHitOut.from_hit(hit, ad.text or "", finding_for_hit(hit, extraction))
     session.commit()
@@ -436,17 +482,21 @@ def confirm_hit(
 @router.post("/ads/{ad_id}/accept-llm", response_model=AdDetail)
 def accept_llm(ad_id: int, session: SessionDep, user: StaffUser, scope: ScopeDep, request: Request) -> AdDetail:
     """Move what the model extracted into the confirmed fields of the publication."""
-    ad = service.get_ad_in_scope(session, scope, ad_id)
+    ad = service.get_ad_in_scope(session, scope, ad_id, for_update=True)
     if ad.llm_status is not LlmStatus.done or ad.llm_extraction is None:
         raise api_error(409, "llm_not_ready", "Нет результата ИИ для подтверждения")
     extraction = Extraction.model_validate(ad.llm_extraction)
     facts = supported_facts(extraction, ad.text or "")
     before = audit.snapshot(ad)
+    previous_payment_schemes = set(ad.payment_schemes)
+    previous_claimed_readiness_pct = ad.claimed_readiness_pct
+    previous_price_before_completion = ad.price_before_completion
     ad.payment_schemes = list(dict.fromkeys([*ad.payment_schemes, *(scheme.value for scheme in facts.payment_schemes)]))
     if facts.claimed_readiness_pct is not None:
         ad.claimed_readiness_pct = facts.claimed_readiness_pct
     if facts.price_before_completion:
         ad.price_before_completion = True
+    newly_confirmed_hit = False
     for hit in session.scalars(
         select(PhraseHit).where(
             PhraseHit.ad_post_id == ad.id, PhraseHit.detected_by == DetectedBy.llm, PhraseHit.confirmed.is_(None)
@@ -457,6 +507,21 @@ def accept_llm(ad_id: int, session: SessionDep, user: StaffUser, scope: ScopeDep
         if finding is None or finding.confidence >= UNCERTAIN_BELOW:
             hit.confirmed = True
             hit.confirmed_by = user.id
+            newly_confirmed_hit = True
+    added_payment_scheme = bool(set(ad.payment_schemes) - previous_payment_schemes)
+    changed_claimed_readiness = (
+        ad.claimed_readiness_pct is not None and ad.claimed_readiness_pct != previous_claimed_readiness_pct
+    )
+    added_price_before_completion = ad.price_before_completion and not previous_price_before_completion
+    _reopen_irrelevant_for_new_fact(
+        ad,
+        introduced_fact=(
+            added_payment_scheme
+            or changed_claimed_readiness
+            or added_price_before_completion
+            or newly_confirmed_hit
+        ),
+    )
     session.flush()
     recompute_weights(session, ad)
     if ad.object_id is not None:
