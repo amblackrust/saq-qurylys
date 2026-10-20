@@ -95,8 +95,8 @@ interface RequestOptions {
 async function send(path: string, options: RequestOptions = {}): Promise<Response> {
   const { method = 'GET', params, body, signal } = options;
   const headers = new Headers();
-  const token = getToken();
-  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const requestToken = getToken();
+  if (requestToken) headers.set('Authorization', `Bearer ${requestToken}`);
 
   let payload: BodyInit | undefined;
   if (body instanceof FormData) {
@@ -116,7 +116,9 @@ async function send(path: string, options: RequestOptions = {}): Promise<Respons
 
   if (!response.ok) {
     const error = await toApiError(response);
-    if (response.status === 401 && path !== '/auth/login') unauthorizedHandler?.();
+    if (response.status === 401 && path !== '/auth/login' && requestToken && getToken() === requestToken) {
+      unauthorizedHandler?.();
+    }
     throw error;
   }
   return response;
@@ -140,8 +142,8 @@ export function apiUpload<T>(
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', `${API_PREFIX}${path}`);
-    const token = getToken();
-    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    const requestToken = getToken();
+    if (requestToken) xhr.setRequestHeader('Authorization', `Bearer ${requestToken}`);
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable) onProgress?.(Math.round((event.loaded / event.total) * 100));
     };
@@ -158,7 +160,7 @@ export function apiUpload<T>(
         }
         return;
       }
-      if (xhr.status === 401) unauthorizedHandler?.();
+      if (xhr.status === 401 && requestToken && getToken() === requestToken) unauthorizedHandler?.();
       reject(errorFromBody(xhr.status, xhr.statusText, xhr.responseText));
     };
     xhr.send(form);

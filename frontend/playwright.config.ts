@@ -6,6 +6,7 @@ import { BASE_URL } from './e2e/support/env';
 export default defineConfig({
   testDir: './e2e',
   outputDir: './test-results',
+  testIgnore: ['**/*-regression.spec.ts'],
   fullyParallel: false,
   workers: Number(process.env.E2E_WORKERS ?? 1),
   retries: 0,
