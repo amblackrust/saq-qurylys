@@ -89,9 +89,7 @@ def link(ad_post_id: int) -> None:
         try:
             previous, current = service.link_ad(session, ad)
             moved = (
-                [object_id for object_id in (previous, current) if object_id is not None]
-                if previous != current
-                else []
+                [object_id for object_id in (previous, current) if object_id is not None] if previous != current else []
             )
             for object_id in moved:
                 # The claims of the post moved from one object to the other.

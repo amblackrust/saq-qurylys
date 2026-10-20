@@ -54,9 +54,7 @@ def test_a_text_only_manual_ad_with_an_unqueued_pipeline_is_visible_and_cannot_b
     client: TestClient, world: World, broker_down: None
 ) -> None:
     headers = auth(world.users["mio_ust"])
-    response = client.post(
-        f"{ADS}/manual", headers=headers, data={"text": "Бронь без договора", "platform": "other"}
-    )
+    response = client.post(f"{ADS}/manual", headers=headers, data={"text": "Бронь без договора", "platform": "other"})
 
     assert response.status_code == 201, response.text
     body = response.json()

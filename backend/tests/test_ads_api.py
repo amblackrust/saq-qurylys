@@ -118,9 +118,7 @@ def test_manual_ad_upload_limits_follow_runtime_setting_and_keep_file_cap(
     assert too_large.json()["detail"]["code"] == "file_too_large"
 
 
-def test_triage_write_requires_auth_and_respects_territory_scope(
-    client: TestClient, db: Session, world: World
-) -> None:
+def test_triage_write_requires_auth_and_respects_territory_scope(client: TestClient, db: Session, world: World) -> None:
     foreign = add_ad(db, world.semey, "Не менять чужой разбор", review_state=AdReviewState.deferred)
 
     anonymous = client.patch(f"{ADS}/{foreign.id}/triage", json={"state": "irrelevant"})
@@ -214,9 +212,7 @@ def test_queue_defaults_to_unreviewed_and_requeues_reviewed_with_new_unresolved_
 
     reviewed = client.get(ADS, headers=headers, params={"queue": "true", "review_state": "reviewed"}).json()
     assert {item["id"] for item in reviewed["items"]} == {clean_reviewed.id, stale_reviewed.id}
-    deferred_rows = client.get(
-        ADS, headers=headers, params={"queue": "true", "review_state": "deferred"}
-    ).json()
+    deferred_rows = client.get(ADS, headers=headers, params={"queue": "true", "review_state": "deferred"}).json()
     assert [item["id"] for item in deferred_rows["items"]] == [deferred.id]
 
     ordinary = client.get(ADS, headers=headers).json()
@@ -224,9 +220,7 @@ def test_queue_defaults_to_unreviewed_and_requeues_reviewed_with_new_unresolved_
     assert {item["id"] for item in ordinary["items"]} == {manual.id, clean_reviewed.id, stale_reviewed.id, deferred.id}
 
 
-def test_duplicate_advisory_is_scoped_capped_and_paginated(
-    client: TestClient, db: Session, world: World
-) -> None:
+def test_duplicate_advisory_is_scoped_capped_and_paginated(client: TestClient, db: Session, world: World) -> None:
     account = SourceAccount(platform=Platform.instagram, handle="known_source", territory_id=world.ust.id)
     other_account = SourceAccount(platform=Platform.instagram, handle="other_source", territory_id=world.ust.id)
     db.add_all([account, other_account])
@@ -323,7 +317,9 @@ def test_triage_records_reopen_and_does_not_change_ad_facts_or_emit_object_event
     )
     assert events == []
     audit_rows = list(
-        db.scalars(select(AuditLog).where(AuditLog.action == "ad.triage", AuditLog.entity_id == ad.id).order_by(AuditLog.id))
+        db.scalars(
+            select(AuditLog).where(AuditLog.action == "ad.triage", AuditLog.entity_id == ad.id).order_by(AuditLog.id)
+        )
     )
     assert len(audit_rows) == 2
     assert audit_rows[0].before["review_state"] == "unreviewed"
@@ -356,9 +352,7 @@ def test_reviewed_triage_waits_for_pending_or_failed_pipeline(
         values["url"] = "https://example.kz/post"
     ad = add_ad(db, world.ust, "Обработка ещё не завершена", **values)
 
-    response = client.patch(
-        f"{ADS}/{ad.id}/triage", headers=auth(world.users["mio_ust"]), json={"state": "reviewed"}
-    )
+    response = client.patch(f"{ADS}/{ad.id}/triage", headers=auth(world.users["mio_ust"]), json={"state": "reviewed"})
 
     assert response.status_code == 409 and response.json()["detail"]["code"] == "reviewed_unresolved"
     db.refresh(ad)
@@ -380,9 +374,7 @@ def test_a_failed_text_only_pipeline_can_be_retried_once_and_stays_unreviewable_
 
     monkeypatch.setattr(service, "dispatch_pipeline", queue_failure)
     headers = auth(world.users["mio_ust"])
-    created = client.post(
-        f"{ADS}/manual", headers=headers, data={"text": "Бронь без договора", "platform": "other"}
-    )
+    created = client.post(f"{ADS}/manual", headers=headers, data={"text": "Бронь без договора", "platform": "other"})
     assert created.status_code == 201, created.text
     ad_id = created.json()["id"]
     assert created.json()["analysis_status"] == "failed"
@@ -390,9 +382,7 @@ def test_a_failed_text_only_pipeline_can_be_retried_once_and_stays_unreviewable_
 
     retry_args: list[tuple[int, bool, int | None]] = []
 
-    def queued(
-        ad_post_id: int, *, capture: bool, requested_by: int | None, llm_only: bool = False
-    ) -> bool:
+    def queued(ad_post_id: int, *, capture: bool, requested_by: int | None, llm_only: bool = False) -> bool:
         retry_args.append((ad_post_id, capture, requested_by))
         return True
 
@@ -581,9 +571,7 @@ def test_confirming_a_link_reopens_irrelevant_ad_and_keeps_its_risk_facts(
     )
     headers = auth(world.users["mio_ust"])
     note = "Публикация не относится к объектам"
-    triaged = client.patch(
-        f"{ADS}/{ad.id}/triage", headers=headers, json={"state": "irrelevant", "note": note}
-    )
+    triaged = client.patch(f"{ADS}/{ad.id}/triage", headers=headers, json={"state": "irrelevant", "note": note})
     assert triaged.status_code == 200 and triaged.json()["review_state"] == "irrelevant"
 
     response = client.patch(f"{ADS}/{ad.id}", headers=headers, json={"object_id": obj.id})
@@ -1114,9 +1102,7 @@ def test_manual_relinks_restore_original_territory_after_a_to_b_to_c(
     assert client.get(f"{ADS}/{ad.id}", headers=auth(world.users["mio_semey"])).status_code == 404
 
 
-def test_legacy_unlink_requires_an_in_scope_territory_choice(
-    client: TestClient, db: Session, world: World
-) -> None:
+def test_legacy_unlink_requires_an_in_scope_territory_choice(client: TestClient, db: Session, world: World) -> None:
     obj = make_object(db, world.semey, "ЖК Legacy")
     ad = add_ad(
         db,

@@ -314,9 +314,7 @@ def get_ad(ad_id: int, session: SessionDep, user: StaffUser, scope: ScopeDep) ->
 
 
 @router.post("/ads/{ad_id}/retry-analysis", response_model=AdDetail)
-def retry_analysis(
-    ad_id: int, session: SessionDep, user: StaffUser, scope: ScopeDep, request: Request
-) -> AdDetail:
+def retry_analysis(ad_id: int, session: SessionDep, user: StaffUser, scope: ScopeDep, request: Request) -> AdDetail:
     ad = service.get_ad_in_scope(session, scope, ad_id, for_update=True)
     if (
         ad.analysis_status is AnalysisStatus.pending
@@ -378,9 +376,7 @@ def triage_ad(
     """Record a staff triage decision without changing publication facts, status, or risk inputs."""
     ad = service.get_ad_in_scope(session, scope, ad_id, for_update=True)
     has_unreviewed_hits = bool(
-        session.scalar(
-            select(exists().where(PhraseHit.ad_post_id == ad.id, PhraseHit.confirmed.is_(None)))
-        )
+        session.scalar(select(exists().where(PhraseHit.ad_post_id == ad.id, PhraseHit.confirmed.is_(None))))
     )
     has_confirmed_hits = bool(
         session.scalar(select(exists().where(PhraseHit.ad_post_id == ad.id, PhraseHit.confirmed.is_(True))))
@@ -536,10 +532,7 @@ def update_ad(
     _reopen_irrelevant_for_new_fact(
         ad,
         introduced_fact=(
-            confirmed_link_added
-            or added_payment_scheme
-            or changed_claimed_readiness
-            or added_price_before_completion
+            confirmed_link_added or added_payment_scheme or changed_claimed_readiness or added_price_before_completion
         ),
     )
 
@@ -622,10 +615,7 @@ def accept_llm(ad_id: int, session: SessionDep, user: StaffUser, scope: ScopeDep
     _reopen_irrelevant_for_new_fact(
         ad,
         introduced_fact=(
-            added_payment_scheme
-            or changed_claimed_readiness
-            or added_price_before_completion
-            or newly_confirmed_hit
+            added_payment_scheme or changed_claimed_readiness or added_price_before_completion or newly_confirmed_hit
         ),
     )
     session.flush()

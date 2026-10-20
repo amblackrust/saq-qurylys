@@ -109,9 +109,7 @@ def test_a_post_nobody_reviewed_needs_a_person_to_confirm_a_guessed_link(
     assert (ad.object_id, ad.link_method, ad.status) == (obj.id, LinkMethod.name, AdStatus.verification)
 
 
-def test_background_linking_preserves_irrelevant_unlinked_and_tentative_posts(
-    db: Session, world: World
-) -> None:
+def test_background_linking_preserves_irrelevant_unlinked_and_tentative_posts(db: Session, world: World) -> None:
     obj = make_object(db, world.ust, "Жилой комплекс Нур Плаза")
     unlinked = add_ad(
         db,

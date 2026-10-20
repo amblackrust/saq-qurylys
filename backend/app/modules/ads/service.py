@@ -192,17 +192,14 @@ def build_rows(session: Session, rows: Sequence[tuple[AdPost, str | None]], scop
         )
     )
     duplicates = duplicate_metadata(session, ads, scope)
-    return [
-        _row_with_metadata(ad, object_name, ad.id in unreviewed_hit_ad_ids, duplicates)
-        for ad, object_name in rows
-    ]
+    return [_row_with_metadata(ad, object_name, ad.id in unreviewed_hit_ad_ids, duplicates) for ad, object_name in rows]
 
 
 def build_detail(session: Session, ad: AdPost, scope: TerritoryScope) -> AdDetail:
     obj = session.get(ConstructionObject, ad.object_id) if ad.object_id is not None else None
-    hits = list(session.scalars(
-        select(PhraseHit).where(PhraseHit.ad_post_id == ad.id).order_by(PhraseHit.start, PhraseHit.id)
-    ))
+    hits = list(
+        session.scalars(select(PhraseHit).where(PhraseHit.ad_post_id == ad.id).order_by(PhraseHit.start, PhraseHit.id))
+    )
     evidence = [
         EvidenceOut.model_validate(item)
         for item in session.scalars(select(Evidence).where(Evidence.ad_post_id == ad.id).order_by(Evidence.id))
@@ -308,9 +305,7 @@ def create_manual_ad(
     return ad
 
 
-def dispatch_pipeline(
-    ad_post_id: int, *, capture: bool, requested_by: int | None, llm_only: bool = False
-) -> bool:
+def dispatch_pipeline(ad_post_id: int, *, capture: bool, requested_by: int | None, llm_only: bool = False) -> bool:
     """Queue either the full publication pipeline or just its failed LLM stage.
 
     Call after the post is committed. Returns False when the broker is unreachable; the request whose data is
