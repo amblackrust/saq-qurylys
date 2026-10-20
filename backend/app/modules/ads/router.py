@@ -474,8 +474,9 @@ def _get_account(session: SessionDep, scope: ScopeDep, account_id: int) -> Sourc
 def _check_account_references(
     session: SessionDep, scope: ScopeDep, object_id: int | None, developer_id: int | None, territory_id: int | None
 ) -> None:
+    object_territory_id: int | None = None
     if object_id is not None:
-        get_object_in_scope(session, scope, object_id)
+        object_territory_id = get_object_in_scope(session, scope, object_id).territory_id
     if developer_id is not None:
         get_visible_developer(session, scope, developer_id)
     if territory_id is not None:
@@ -483,6 +484,8 @@ def _check_account_references(
             raise api_error(422, "territory_not_found", "Территория не найдена")
         if not scope.contains(territory_id):
             raise forbidden("Территория вне вашей зоны ответственности")
+    if object_id is not None and object_territory_id != territory_id:
+        raise api_error(422, "territory_mismatch", "Территория не совпадает с территорией объекта")
 
 
 def _ensure_account_unique(session: SessionDep, platform: Platform, handle: str, own_id: int | None = None) -> None:
@@ -574,8 +577,6 @@ def create_source_account(
         handle = handle_from_url(body.platform, body.url)
     if not handle:
         raise api_error(422, "validation_error", "Не удалось определить имя аккаунта: укажите handle")
-    _check_account_references(session, scope, body.object_id, body.developer_id, body.territory_id)
-    _ensure_account_unique(session, body.platform, handle)
     territory_id = body.territory_id
     if territory_id is None:
         object_territory = (
@@ -584,6 +585,8 @@ def create_source_account(
             else None
         )
         territory_id = object_territory if object_territory is not None else user.territory_id
+    _check_account_references(session, scope, body.object_id, body.developer_id, territory_id)
+    _ensure_account_unique(session, body.platform, handle)
     account = SourceAccount(
         **body.model_dump(exclude={"handle", "territory_id"}), handle=handle, territory_id=territory_id
     )
@@ -604,7 +607,11 @@ def update_source_account(
     account = _get_account(session, scope, account_id)
     changes = body.model_dump(exclude_unset=True)
     _check_account_references(
-        session, scope, changes.get("object_id"), changes.get("developer_id"), changes.get("territory_id")
+        session,
+        scope,
+        changes.get("object_id", account.object_id),
+        changes.get("developer_id"),
+        changes.get("territory_id", account.territory_id),
     )
     if account.platform is Platform.aggregator:
         if "url" in changes:

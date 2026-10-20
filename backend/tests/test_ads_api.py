@@ -1066,6 +1066,86 @@ def test_source_account_patch_cannot_take_an_existing_handle(client: TestClient,
     assert response.status_code == 409 and response.json()["detail"]["code"] == "source_account_exists"
 
 
+def test_source_account_object_and_territory_must_match(client: TestClient, db: Session, world: World) -> None:
+    headers = auth(world.users["mio_region"])
+    ust_object = make_object(db, world.ust, "ЖК Усть-Каменогорск")
+    semey_object = make_object(db, world.semey, "ЖК Семей")
+
+    inferred = client.post(
+        "/api/v1/source-accounts",
+        headers=headers,
+        json={"platform": "instagram", "handle": "semey_inferred", "object_id": semey_object.id},
+    )
+    assert inferred.status_code == 201, inferred.text
+    assert inferred.json()["territory_id"] == world.semey.id
+
+    inferred_null = client.post(
+        "/api/v1/source-accounts",
+        headers=headers,
+        json={
+            "platform": "instagram",
+            "handle": "semey_inferred_null",
+            "object_id": semey_object.id,
+            "territory_id": None,
+        },
+    )
+    assert inferred_null.status_code == 201, inferred_null.text
+    assert inferred_null.json()["territory_id"] == world.semey.id
+
+    mismatch = client.post(
+        "/api/v1/source-accounts",
+        headers=headers,
+        json={
+            "platform": "instagram",
+            "handle": "semey_in_ust",
+            "object_id": semey_object.id,
+            "territory_id": world.ust.id,
+        },
+    )
+    assert mismatch.status_code == 422
+    assert mismatch.json()["detail"]["code"] == "territory_mismatch"
+
+    created = client.post(
+        "/api/v1/source-accounts",
+        headers=headers,
+        json={"platform": "telegram", "handle": "ust_object", "object_id": ust_object.id},
+    )
+    assert created.status_code == 201, created.text
+    account_id = created.json()["id"]
+
+    object_only = client.patch(
+        f"/api/v1/source-accounts/{account_id}", headers=headers, json={"object_id": semey_object.id}
+    )
+    assert object_only.status_code == 422
+    assert object_only.json()["detail"]["code"] == "territory_mismatch"
+
+    territory_only = client.patch(
+        f"/api/v1/source-accounts/{account_id}", headers=headers, json={"territory_id": world.semey.id}
+    )
+    assert territory_only.status_code == 422
+    assert territory_only.json()["detail"]["code"] == "territory_mismatch"
+
+    moved = client.patch(
+        f"/api/v1/source-accounts/{account_id}",
+        headers=headers,
+        json={"object_id": semey_object.id, "territory_id": world.semey.id},
+    )
+    assert moved.status_code == 200, moved.text
+    assert (moved.json()["object_id"], moved.json()["territory_id"]) == (semey_object.id, world.semey.id)
+
+    territory_null = client.patch(f"/api/v1/source-accounts/{account_id}", headers=headers, json={"territory_id": None})
+    assert territory_null.status_code == 422
+    assert territory_null.json()["detail"]["code"] == "territory_mismatch"
+
+    unlinked = client.patch(f"/api/v1/source-accounts/{account_id}", headers=headers, json={"object_id": None})
+    assert unlinked.status_code == 200, unlinked.text
+    assert (unlinked.json()["object_id"], unlinked.json()["territory_id"]) == (None, world.semey.id)
+
+    detached = client.patch(f"/api/v1/source-accounts/{account_id}", headers=headers, json={"territory_id": None})
+    assert detached.status_code == 200, detached.text
+    assert (detached.json()["object_id"], detached.json()["territory_id"]) == (None, None)
+
+
 # ---------------------------------------------------------------- phrases
 
 
