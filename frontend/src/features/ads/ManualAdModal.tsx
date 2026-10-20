@@ -26,6 +26,10 @@ interface Photo {
   previewUrl: string;
 }
 
+const MAX_PHOTOS = 20;
+const MAX_TOTAL_PHOTO_BYTES = 100 * 1024 * 1024;
+const MAX_TOTAL_PHOTO_MB = MAX_TOTAL_PHOTO_BYTES / (1024 * 1024);
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -50,6 +54,7 @@ export function ManualAdModal({ open, onClose, onCreated }: Props) {
   const options = useEnumOptions();
   const createAd = useCreateManualAd();
   const [photos, setPhotos] = useState<Photo[]>([]);
+  const [photosError, setPhotosError] = useState<string | null>(null);
 
   const schema = useMemo(
     () =>
@@ -91,6 +96,7 @@ export function ManualAdModal({ open, onClose, onCreated }: Props) {
   const resetAll = () => {
     photos.forEach((photo) => URL.revokeObjectURL(photo.previewUrl));
     setPhotos([]);
+    setPhotosError(null);
     reset(emptyValues);
   };
 
@@ -106,13 +112,32 @@ export function ManualAdModal({ open, onClose, onCreated }: Props) {
   };
 
   const addPhotos = (files: File[]) => {
-    const added = files.map((file) => ({ file, previewUrl: URL.createObjectURL(file) }));
-    setPhotos([...photos, ...added]);
+    if (files.length === 0) return;
+    const added: Photo[] = [];
+    let totalBytes = photos.reduce((total, photo) => total + photo.file.size, 0);
+    let error: string | null = null;
+
+    for (const file of files) {
+      if (photos.length + added.length >= MAX_PHOTOS) {
+        error = t('manual.photosTooMany', { max: MAX_PHOTOS });
+        continue;
+      }
+      if (totalBytes + file.size > MAX_TOTAL_PHOTO_BYTES) {
+        error = t('manual.photosTotalTooLarge', { max: MAX_TOTAL_PHOTO_MB });
+        continue;
+      }
+      added.push({ file, previewUrl: URL.createObjectURL(file) });
+      totalBytes += file.size;
+    }
+
+    setPhotosError(error);
+    if (added.length > 0) setPhotos([...photos, ...added]);
   };
 
   const removePhoto = (photo: Photo) => {
     URL.revokeObjectURL(photo.previewUrl);
     setPhotos(photos.filter((item) => item !== photo));
+    setPhotosError(null);
   };
 
   const submit = handleSubmit((values) =>
@@ -223,6 +248,7 @@ export function ManualAdModal({ open, onClose, onCreated }: Props) {
             description={t('manual.photosHint')}
             placeholder={t('manual.photosPlaceholder')}
             leftSection={<IconPhoto />}
+            error={photosError ?? undefined}
             multiple
             accept="image/*"
             value={[]}
