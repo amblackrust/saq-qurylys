@@ -4,7 +4,7 @@ import { IconPhoto, IconX } from '@tabler/icons-react';
 import { Controller, useForm, useWatch } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
-import { useCreateManualAd } from '@/api/hooks/ads';
+import { useAdUploadLimits, useCreateManualAd } from '@/api/hooks/ads';
 import type { Platform } from '@/api/types';
 import { DateTimeInput } from '@/components/form/DateTimeInput';
 import { FileInput } from '@/components/form/FileInput';
@@ -26,9 +26,7 @@ interface Photo {
   previewUrl: string;
 }
 
-const MAX_PHOTOS = 20;
-const MAX_TOTAL_PHOTO_BYTES = 100 * 1024 * 1024;
-const MAX_TOTAL_PHOTO_MB = MAX_TOTAL_PHOTO_BYTES / (1024 * 1024);
+const BYTES_PER_MIB = 1024 * 1024;
 
 interface Props {
   open: boolean;
@@ -53,6 +51,10 @@ export function ManualAdModal({ open, onClose, onCreated }: Props) {
   const { t: tc } = useTranslation('common');
   const options = useEnumOptions();
   const createAd = useCreateManualAd();
+  const uploadLimits = useAdUploadLimits(open);
+  const limits = uploadLimits.data;
+  const limitsLoading = uploadLimits.isPending || uploadLimits.isFetching;
+  const limitsReady = !limitsLoading && !uploadLimits.isError && limits !== undefined;
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [photosError, setPhotosError] = useState<string | null>(null);
 
@@ -112,18 +114,25 @@ export function ManualAdModal({ open, onClose, onCreated }: Props) {
   };
 
   const addPhotos = (files: File[]) => {
-    if (files.length === 0) return;
+    if (files.length === 0 || !limitsReady || !limits) return;
     const added: Photo[] = [];
     let totalBytes = photos.reduce((total, photo) => total + photo.file.size, 0);
     let error: string | null = null;
 
     for (const file of files) {
-      if (photos.length + added.length >= MAX_PHOTOS) {
-        error = t('manual.photosTooMany', { max: MAX_PHOTOS });
+      if (photos.length + added.length >= limits.max_photos) {
+        error ??= t('manual.photosTooMany', { max: limits.max_photos });
         continue;
       }
-      if (totalBytes + file.size > MAX_TOTAL_PHOTO_BYTES) {
-        error = t('manual.photosTotalTooLarge', { max: MAX_TOTAL_PHOTO_MB });
+      if (file.size > limits.max_file_bytes) {
+        error ??= t('manual.photosFileTooLarge', {
+          name: file.name,
+          max: limits.max_file_bytes / BYTES_PER_MIB,
+        });
+        continue;
+      }
+      if (totalBytes + file.size > limits.max_total_bytes) {
+        error ??= t('manual.photosTotalTooLarge', { max: limits.max_total_bytes / BYTES_PER_MIB });
         continue;
       }
       added.push({ file, previewUrl: URL.createObjectURL(file) });
@@ -140,7 +149,28 @@ export function ManualAdModal({ open, onClose, onCreated }: Props) {
     setPhotosError(null);
   };
 
-  const submit = handleSubmit((values) =>
+  const submit = handleSubmit((values) => {
+    if (!limitsReady || !limits) return;
+    if (photos.length > limits.max_photos) {
+      setPhotosError(t('manual.photosTooMany', { max: limits.max_photos }));
+      return;
+    }
+    let totalBytes = 0;
+    for (const photo of photos) {
+      if (photo.file.size > limits.max_file_bytes) {
+        setPhotosError(t('manual.photosFileTooLarge', {
+          name: photo.file.name,
+          max: limits.max_file_bytes / BYTES_PER_MIB,
+        }));
+        return;
+      }
+      totalBytes += photo.file.size;
+    }
+    if (totalBytes > limits.max_total_bytes) {
+      setPhotosError(t('manual.photosTotalTooLarge', { max: limits.max_total_bytes / BYTES_PER_MIB }));
+      return;
+    }
+
     createAd.mutate(
       {
         text: values.text,
@@ -160,8 +190,8 @@ export function ManualAdModal({ open, onClose, onCreated }: Props) {
           onClose();
         },
       },
-    ),
-  );
+    );
+  });
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && close()}>
@@ -245,15 +275,29 @@ export function ManualAdModal({ open, onClose, onCreated }: Props) {
           )}
           <FileInput
             label={t('manual.photos')}
-            description={t('manual.photosHint')}
+            description={limitsReady && limits ? t('manual.photosHint', {
+              maxPhotos: limits.max_photos,
+              maxFile: limits.max_file_bytes / BYTES_PER_MIB,
+              maxTotal: limits.max_total_bytes / BYTES_PER_MIB,
+            }) : undefined}
             placeholder={t('manual.photosPlaceholder')}
             leftSection={<IconPhoto />}
             error={photosError ?? undefined}
+            disabled={!limitsReady}
             multiple
             accept="image/*"
             value={[]}
             onChange={addPhotos}
           />
+          {limitsLoading && <p role="status" className="m-0 text-sm text-text-3">{t('manual.photosLimitsLoading')}</p>}
+          {uploadLimits.isError && !limitsLoading && (
+            <div role="alert" className="flex items-center justify-between gap-3 text-sm text-danger">
+              <span>{t('manual.photosLimitsUnavailable')}</span>
+              <Button type="button" variant="secondary" disabled={limitsLoading} onClick={() => void uploadLimits.refetch()}>
+                {tc('retry')}
+              </Button>
+            </div>
+          )}
           {photos.length > 0 && (
             <ul className="m-0 flex list-none flex-wrap gap-2 p-0">
               {photos.map((photo) => (
@@ -281,7 +325,7 @@ export function ManualAdModal({ open, onClose, onCreated }: Props) {
             <Button type="button" variant="secondary" onClick={close}>
               {tc('cancel')}
             </Button>
-            <Button type="submit" className="max-sm:min-h-11" loading={createAd.isPending}>
+            <Button type="submit" className="max-sm:min-h-11" disabled={!limitsReady} loading={createAd.isPending}>
               {t('manual.submit')}
             </Button>
           </DialogFooter>

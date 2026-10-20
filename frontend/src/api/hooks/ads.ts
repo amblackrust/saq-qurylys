@@ -8,6 +8,7 @@ import type {
   AdPatch,
   AdRow,
   AdTriageInput,
+  AdUploadLimits,
   CaptureRequest,
   CollectorStatus,
   CollectQueued,
@@ -24,6 +25,15 @@ const COLLECT_REFRESH_MS = 10_000;
 
 /** Keep polling while capture or OCR is pending; terminal statuses stop polling. */
 const isProcessing = (ad: AdRow) => ad.capture_status === 'pending' || ad.ocr_status === 'pending';
+
+export function useAdUploadLimits(enabled = true) {
+  return useQuery({
+    queryKey: qk.adUploadLimits,
+    queryFn: () => api<AdUploadLimits>('/ads/upload-limits'),
+    enabled,
+    retry: false,
+  });
+}
 
 export function useAds(params: AdListParams) {
   return useQuery({

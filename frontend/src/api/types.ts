@@ -679,6 +679,12 @@ export interface AdDetail extends AdRow {
   vision_source?: { session_id: number; finding_id: number; frame_id: number | null; timestamp_ms: number | null } | null;
 }
 
+export interface AdUploadLimits {
+  max_file_bytes: number;
+  max_total_bytes: number;
+  max_photos: number;
+}
+
 export interface AdListParams {
   platform?: Platform;
   object_id?: number;

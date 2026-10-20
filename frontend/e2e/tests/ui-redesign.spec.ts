@@ -522,6 +522,8 @@ interface MockState {
   ad: AdDetail;
   object: ObjectDetail;
   ads: AdDetail[];
+  adUploadLimits?: { max_file_bytes: number; max_total_bytes: number; max_photos: number };
+  adUploadLimitsFailures?: number;
   triageFailure?: { state: AdReviewState; code: string; message: string };
   adListFailure?: { code: string; message: string };
   adListDelayMs?: number;
@@ -862,6 +864,17 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
       const limit = Number(url.searchParams.get('limit') ?? rows.length);
       if (state.adListDelayMs) await new Promise((resolve) => setTimeout(resolve, state.adListDelayMs));
       return json(route, { items: rows.slice(offset, offset + limit), total });
+    }
+    if (method === 'GET' && path === '/ads/upload-limits') {
+      if ((state.adUploadLimitsFailures ?? 0) > 0) {
+        state.adUploadLimitsFailures = (state.adUploadLimitsFailures ?? 1) - 1;
+        return json(route, { detail: { code: 'temporary_failure', message: 'Could not load upload limits' } }, 503);
+      }
+      return json(route, state.adUploadLimits ?? {
+        max_file_bytes: 25 * 1024 * 1024,
+        max_total_bytes: 100 * 1024 * 1024,
+        max_photos: 20,
+      });
     }
     if (method === 'GET' && /^\/ads\/\d+$/.test(path)) {
       const id = Number(path.split('/').at(-1));
@@ -3854,12 +3867,23 @@ test('mocked logout sends the bearer token and does not restore it on reload', a
   expect(harness.pageErrors).toEqual([]);
 });
 
-test('manual ad photo selection enforces count and aggregate limits while allowing larger individual files', async ({ page }) => {
+test('manual ad photo selection enforces per-file, count and aggregate limits', async ({ page }) => {
   const harness = await installMocks(page, 'mio_officer');
   await page.goto('/ads');
   await page.getByRole('button', { name: t('ads:actions.manual') }).click();
   const dialog = page.getByRole('dialog', { name: t('ads:manual.title') });
   const input = dialog.locator('input[type="file"]');
+  await expect(input).toBeEnabled();
+  await expect(dialog.getByText(t('ads:manual.photosHint', { maxPhotos: 20, maxFile: 25, maxTotal: 100 }))).toBeVisible();
+  await page.evaluate(() => {
+    const trackedWindow = window as Window & { __createdPreviewUrls?: number };
+    trackedWindow.__createdPreviewUrls = 0;
+    const original = URL.createObjectURL.bind(URL);
+    URL.createObjectURL = (object) => {
+      trackedWindow.__createdPreviewUrls = (trackedWindow.__createdPreviewUrls ?? 0) + 1;
+      return original(object);
+    };
+  });
   const selectSizedPhotos = (photos: Array<{ name: string; size: number }>) =>
     input.evaluate((element, selectedPhotos) => {
       const fileInput = element as HTMLInputElement;
@@ -3877,27 +3901,87 @@ test('manual ad photo selection enforces count and aggregate limits while allowi
   };
   const mib = 1024 * 1024;
 
-  await selectSizedPhotos([{ name: 'photo-49mb.png', size: 49 * mib }]);
-  await expect(dialog.getByRole('img', { name: 'photo-49mb.png' })).toBeVisible();
+  await selectSizedPhotos([{ name: 'photo-26mb.png', size: 26 * mib }]);
+  await expect(dialog.getByText(t('ads:manual.photosFileTooLarge', { name: 'photo-26mb.png', max: 25 }))).toBeVisible();
+  await expect(dialog.getByRole('img', { name: 'photo-26mb.png' })).toHaveCount(0);
+  expect(await page.evaluate(() => (window as Window & { __createdPreviewUrls?: number }).__createdPreviewUrls)).toBe(0);
+
+  await selectSizedPhotos([
+    { name: 'photo-24-a.png', size: 24.5 * mib },
+    { name: 'photo-24-b.png', size: 24.5 * mib },
+  ]);
+  await expect(dialog.getByRole('img', { name: 'photo-24-a.png' })).toBeVisible();
+  await expect(dialog.getByRole('img', { name: 'photo-24-b.png' })).toBeVisible();
   await expect(dialog.getByText(t('ads:manual.photosTotalTooLarge', { max: 100 }))).toHaveCount(0);
-  await removePhoto('photo-49mb.png');
+  await removePhoto('photo-24-a.png');
+  await removePhoto('photo-24-b.png');
 
-  await selectSizedPhotos([{ name: 'photo-60mb.png', size: 60 * mib }]);
-  await expect(dialog.getByRole('img', { name: 'photo-60mb.png' })).toBeVisible();
-  await removePhoto('photo-60mb.png');
+  await selectSizedPhotos([
+    { name: 'photo-20-a.png', size: 20 * mib },
+    { name: 'photo-20-b.png', size: 20 * mib },
+    { name: 'photo-20-c.png', size: 20 * mib },
+  ]);
+  await expect(dialog.locator('img')).toHaveCount(3);
+  await removePhoto('photo-20-a.png');
+  await removePhoto('photo-20-b.png');
+  await removePhoto('photo-20-c.png');
 
-  await selectSizedPhotos([{ name: 'photo-100mb.png', size: 100 * mib }]);
-  await expect(dialog.getByRole('img', { name: 'photo-100mb.png' })).toBeVisible();
+  await selectSizedPhotos(Array.from({ length: 4 }, (_, index) => ({ name: `photo-25-${index + 1}.png`, size: 25 * mib })));
+  await expect(dialog.locator('img')).toHaveCount(4);
   await selectSizedPhotos([{ name: 'photo-over-total.png', size: 1 }]);
   await expect(dialog.getByText(t('ads:manual.photosTotalTooLarge', { max: 100 }))).toBeVisible();
   await expect(dialog.getByRole('img', { name: 'photo-over-total.png' })).toHaveCount(0);
-  await removePhoto('photo-100mb.png');
+  for (let index = 1; index <= 4; index += 1) await removePhoto(`photo-25-${index}.png`);
 
   await selectSizedPhotos(Array.from({ length: 21 }, (_, index) => ({ name: `photo-${index + 1}.png`, size: 1 })));
   await expect(dialog.getByText(t('ads:manual.photosTooMany', { max: 20 }))).toBeVisible();
   await expect(dialog.locator('img')).toHaveCount(20);
   await expect(dialog.getByRole('img', { name: 'photo-21.png' })).toHaveCount(0);
   expect(harness.mutations.filter(({ method, path }) => method === 'POST' && path === '/ads/manual')).toHaveLength(0);
+});
+
+test('manual ad photo selection uses the configured per-file limit', async ({ page }) => {
+  const mib = 1024 * 1024;
+  await installMocks(page, 'mio_officer', {
+    adUploadLimits: { max_file_bytes: 10 * mib, max_total_bytes: 100 * mib, max_photos: 20 },
+  });
+  await page.goto('/ads');
+  await page.getByRole('button', { name: t('ads:actions.manual') }).click();
+  const dialog = page.getByRole('dialog', { name: t('ads:manual.title') });
+  const input = dialog.locator('input[type="file"]');
+  await expect(input).toBeEnabled();
+  await expect(dialog.getByText(t('ads:manual.photosHint', { maxPhotos: 20, maxFile: 10, maxTotal: 100 }))).toBeVisible();
+  const selectSizedPhoto = (name: string, size: number) =>
+    input.evaluate((element, selected) => {
+      const file = new File(['x'], selected.name, { type: 'image/png' });
+      Object.defineProperty(file, 'size', { value: selected.size });
+      const files = new DataTransfer();
+      files.items.add(file);
+      const fileInput = element as HTMLInputElement;
+      fileInput.files = files.files;
+      fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    }, { name, size });
+
+  await selectSizedPhoto('photo-11mb.png', 11 * mib);
+  await expect(dialog.getByText(t('ads:manual.photosFileTooLarge', { name: 'photo-11mb.png', max: 10 }))).toBeVisible();
+  await expect(dialog.getByRole('img', { name: 'photo-11mb.png' })).toHaveCount(0);
+  await selectSizedPhoto('photo-10mb.png', 10 * mib);
+  await expect(dialog.getByRole('img', { name: 'photo-10mb.png' })).toBeVisible();
+});
+
+test('manual ad entry blocks submit until upload limits load and offers retry', async ({ page }) => {
+  await installMocks(page, 'mio_officer', { adUploadLimitsFailures: 1 });
+  await page.goto('/ads');
+  await page.getByRole('button', { name: t('ads:actions.manual') }).click();
+  const dialog = page.getByRole('dialog', { name: t('ads:manual.title') });
+  const input = dialog.locator('input[type="file"]');
+
+  await expect(dialog.getByRole('alert')).toContainText(t('ads:manual.photosLimitsUnavailable'));
+  await expect(input).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: t('ads:manual.submit') })).toBeDisabled();
+  await dialog.getByRole('button', { name: t('common:retry') }).click();
+  await expect(input).toBeEnabled();
+  await expect(dialog.getByRole('button', { name: t('ads:manual.submit') })).toBeEnabled();
 });
 
 test('an old pending ad keeps polling until capture and OCR reach terminal states', async ({ page }) => {

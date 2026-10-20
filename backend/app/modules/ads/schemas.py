@@ -213,6 +213,12 @@ class CollectorStatus(BaseModel):
     sources: dict[str, bool] = {}
 
 
+class AdUploadLimits(BaseModel):
+    max_file_bytes: int
+    max_total_bytes: int
+    max_photos: int
+
+
 class CollectQueued(BaseModel):
     queued: bool = True
 

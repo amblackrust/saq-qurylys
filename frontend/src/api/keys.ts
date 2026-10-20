@@ -18,6 +18,7 @@ export const qk = {
   ads: ['ads'] as const,
   adList: (params: AdListParams) => ['ads', 'list', params] as const,
   ad: (id: number) => ['ads', 'detail', id] as const,
+  adUploadLimits: ['ads', 'upload-limits'] as const,
   sourceAccounts: ['source-accounts'] as const,
   sourceCollectors: ['source-accounts', 'collectors'] as const,
   phrases: ['phrases'] as const,

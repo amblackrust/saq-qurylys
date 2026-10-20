@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import storage
+from app.config import get_settings
 from app.models import AdPost, AuditLog, Evidence, PhraseHit, SourceAccount
 from app.models.enums import (
     AdReviewState,
@@ -72,6 +73,7 @@ def test_receiving_bodies_cannot_use_ads(client: TestClient, db: Session, world:
     ad = add_ad(db, world.ust)
     headers = auth(world.users[role])
     assert client.get(ADS, headers=headers).status_code == 403
+    assert client.get(f"{ADS}/upload-limits", headers=headers).status_code == 403
     assert client.get(f"{ADS}/{ad.id}", headers=headers).status_code == 403
     assert client.post(f"{ADS}/capture", headers=headers, json={"url": "https://example.kz/a"}).status_code == 403
     assert client.post(f"{ADS}/manual", headers=headers, data={"text": "x", "platform": "other"}).status_code == 403
@@ -83,8 +85,33 @@ def test_receiving_bodies_cannot_use_ads(client: TestClient, db: Session, world:
 
 
 def test_anonymous_requests_are_rejected(client: TestClient) -> None:
-    for path in (ADS, "/api/v1/source-accounts", "/api/v1/phrases"):
+    for path in (ADS, f"{ADS}/upload-limits", "/api/v1/source-accounts", "/api/v1/phrases"):
         assert client.get(path).status_code == 401
+
+
+def test_manual_ad_upload_limits_follow_runtime_setting_and_keep_file_cap(
+    client: TestClient, world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(get_settings(), "max_upload_mb", 1)
+    headers = auth(world.users["mio_ust"])
+
+    response = client.get(f"{ADS}/upload-limits", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "max_file_bytes": 1024 * 1024,
+        "max_total_bytes": 100 * 1024 * 1024,
+        "max_photos": 20,
+    }
+
+    too_large = client.post(
+        f"{ADS}/manual",
+        headers=headers,
+        data={"text": "x", "platform": "other"},
+        files={"photos": ("a.png", PNG_BYTES + b"x" * (1024 * 1024), "image/png")},
+    )
+    assert too_large.status_code == 413
+    assert too_large.json()["detail"]["code"] == "file_too_large"
 
 
 def test_triage_write_requires_auth_and_respects_territory_scope(

@@ -33,6 +33,7 @@ from app.modules.ads.schemas import (
     AdPatch,
     AdRow,
     AdTriage,
+    AdUploadLimits,
     CaptureRequest,
     CollectorStatus,
     CollectQueued,
@@ -286,6 +287,16 @@ def create_manual_ad(
     if not service.dispatch_pipeline(ad.id, capture=False, requested_by=user.id):
         service.mark_capture_unqueued(session, ad)
     return service.build_detail(session, ad, scope)
+
+
+@router.get("/ads/upload-limits", response_model=AdUploadLimits)
+def ads_upload_limits(user: StaffUser) -> AdUploadLimits:
+    """Limits used when staff add photos to a publication by hand."""
+    return AdUploadLimits(
+        max_file_bytes=get_settings().max_upload_mb * 1024 * 1024,
+        max_total_bytes=MAX_TOTAL_PHOTO_BYTES,
+        max_photos=MAX_PHOTOS,
+    )
 
 
 @router.get("/ads/{ad_id}", response_model=AdDetail)
