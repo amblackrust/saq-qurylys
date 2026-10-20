@@ -647,7 +647,13 @@ def test_mandatory_pipeline_task_failure_is_recorded(
         raise RuntimeError("stage failed")
 
     monkeypatch.setattr(tasks.service, stage, fail)
-    ad = add_ad(db, world.ust, "Публикация", analysis_status=initial_status)
+    ad = add_ad(
+        db,
+        world.ust,
+        "Публикация",
+        analysis_status=initial_status,
+        llm_status=LlmStatus.pending,
+    )
     task = tasks.analyze if stage == "analyze_ad" else tasks.link
 
     with pytest.raises(RuntimeError, match="stage failed"):
@@ -655,6 +661,7 @@ def test_mandatory_pipeline_task_failure_is_recorded(
 
     db.refresh(ad)
     assert ad.analysis_status is expected_status
+    assert ad.llm_status is (LlmStatus.failed if expected_status is AnalysisStatus.failed else LlmStatus.pending)
 
 
 @pytest.mark.parametrize(

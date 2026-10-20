@@ -23,9 +23,9 @@ const PENDING_POLL_MS = 3000;
 // The worker collects after the request is queued; the page shows the outcome once it had time to finish.
 const COLLECT_REFRESH_MS = 10_000;
 
-/** Keep polling while capture, OCR, or required analysis is pending; terminal statuses stop polling. */
+/** Keep polling while capture, OCR, required analysis, or automatic hints are pending. */
 const isProcessing = (ad: AdRow) =>
-  ad.capture_status === 'pending' || ad.ocr_status === 'pending' || ad.analysis_status === 'pending';
+  ad.capture_status === 'pending' || ad.ocr_status === 'pending' || ad.analysis_status === 'pending' || ad.llm_status === 'pending';
 
 export function useAdUploadLimits(enabled = true) {
   return useQuery({
@@ -41,7 +41,7 @@ export function useAds(params: AdListParams) {
     queryKey: qk.adList(params),
     queryFn: () => api<Paged<AdRow>>('/ads', { params: { ...params } }),
     placeholderData: keepPreviousData,
-    // Capture, OCR, and the required publication analysis run asynchronously.
+    // Capture, OCR, publication analysis, and automatic hints run asynchronously.
     refetchInterval: (query) => (query.state.data?.items.some(isProcessing) ? PENDING_POLL_MS : false),
   });
 }

@@ -20,7 +20,13 @@ def _mark_analysis_failed(session: Session, ad_post_id: int) -> None:
     session.execute(
         update(AdPost)
         .where(AdPost.id == ad_post_id, AdPost.analysis_status == AnalysisStatus.pending)
-        .values(analysis_status=AnalysisStatus.failed)
+        .values(
+            analysis_status=AnalysisStatus.failed,
+            llm_status=case(
+                (AdPost.llm_status == LlmStatus.pending, LlmStatus.failed),
+                else_=AdPost.llm_status,
+            ),
+        )
     )
     session.commit()
 
@@ -115,7 +121,6 @@ def link(ad_post_id: int) -> None:
                 )
             )
             session.commit()
-            session.refresh(ad)
         except Exception:
             logger.exception("nlp.link: analysis failed for ad_post %s", ad_post_id)
             _mark_analysis_failed(session, ad_post_id)

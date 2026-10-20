@@ -213,6 +213,7 @@ def submit_citizen_report(
         captured_at=None if url else datetime.now(UTC),
         capture_status=CaptureStatus.pending if url else None,
         analysis_status=ads_service.analysis_status_for_dispatch(),
+        llm_status=ads_service.llm_status_for_dispatch(),
         origin=AdOrigin.citizen,
     )
     session.add(ad)

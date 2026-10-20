@@ -1,14 +1,14 @@
 import logging
 
 import httpx
-from sqlalchemy import or_, update
+from sqlalchemy import case, or_, update
 
 from app import collectors
 from app.config import get_settings
 from app.db import get_sessionmaker
 from app.events import objects_changed
 from app.models import AdPost
-from app.models.enums import AnalysisStatus, CaptureStatus
+from app.models.enums import AnalysisStatus, CaptureStatus, LlmStatus
 from app.modules.ads import recheck, service
 from app.modules.ads.capture import USER_AGENT, capture_ad
 from app.worker.celery_app import celery_app
@@ -46,7 +46,13 @@ def capture(ad_post_id: int, requested_by: int | None = None) -> None:
                 failure_session.execute(
                     update(AdPost)
                     .where(AdPost.id == ad_post_id, AdPost.analysis_status == AnalysisStatus.pending)
-                    .values(analysis_status=AnalysisStatus.failed)
+                    .values(
+                        analysis_status=AnalysisStatus.failed,
+                        llm_status=case(
+                            (AdPost.llm_status == LlmStatus.pending, LlmStatus.failed),
+                            else_=AdPost.llm_status,
+                        ),
+                    )
                 )
                 failure_session.commit()
         except Exception:

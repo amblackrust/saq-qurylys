@@ -366,10 +366,19 @@ def test_reviewed_triage_waits_for_pending_or_failed_pipeline(
 
 
 def test_a_failed_text_only_pipeline_can_be_retried_once_and_stays_unreviewable_while_pending(
-    client: TestClient, world: World, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, db: Session, world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(get_settings(), "events_enabled", True)
-    monkeypatch.setattr(service, "dispatch_pipeline", lambda *args, **kwargs: False)
+
+    def queue_failure(ad_post_id: int, *, capture: bool, requested_by: int | None) -> bool:
+        assert capture is False and requested_by == world.users["mio_ust"].id
+        reserved = db.get(AdPost, ad_post_id)
+        assert reserved is not None
+        assert reserved.analysis_status is AnalysisStatus.pending
+        assert reserved.llm_status is LlmStatus.pending
+        return False
+
+    monkeypatch.setattr(service, "dispatch_pipeline", queue_failure)
     headers = auth(world.users["mio_ust"])
     created = client.post(
         f"{ADS}/manual", headers=headers, data={"text": "Бронь без договора", "platform": "other"}
@@ -377,10 +386,13 @@ def test_a_failed_text_only_pipeline_can_be_retried_once_and_stays_unreviewable_
     assert created.status_code == 201, created.text
     ad_id = created.json()["id"]
     assert created.json()["analysis_status"] == "failed"
+    assert created.json()["llm_status"] == "failed"
 
     retry_args: list[tuple[int, bool, int | None]] = []
 
-    def queued(ad_post_id: int, *, capture: bool, requested_by: int | None) -> bool:
+    def queued(
+        ad_post_id: int, *, capture: bool, requested_by: int | None, llm_only: bool = False
+    ) -> bool:
         retry_args.append((ad_post_id, capture, requested_by))
         return True
 
@@ -388,6 +400,7 @@ def test_a_failed_text_only_pipeline_can_be_retried_once_and_stays_unreviewable_
     retried = client.post(f"{ADS}/{ad_id}/retry-analysis", headers=headers)
     assert retried.status_code == 200, retried.text
     assert retried.json()["analysis_status"] == "pending"
+    assert retried.json()["llm_status"] == "pending"
     assert "analysis_pending" in retried.json()["queue_reasons"]
     assert retry_args == [(ad_id, False, world.users["mio_ust"].id)]
 
@@ -415,6 +428,104 @@ def test_retry_analysis_resets_failed_ocr(
     assert response.status_code == 200, response.text
     assert response.json()["analysis_status"] == "pending"
     assert response.json()["ocr_status"] == "pending"
+
+
+def test_retry_analysis_rejects_an_ad_without_failed_stages(
+    client: TestClient, db: Session, world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(get_settings(), "events_enabled", True)
+    monkeypatch.setattr(service, "dispatch_pipeline", lambda *args, **kwargs: pytest.fail("no retry expected"))
+    ad = add_ad(
+        db,
+        world.ust,
+        "Публикация уже обработана",
+        capture_status=CaptureStatus.done,
+        ocr_status=OcrStatus.done,
+        analysis_status=AnalysisStatus.done,
+        llm_status=LlmStatus.done,
+    )
+
+    response = client.post(f"{ADS}/{ad.id}/retry-analysis", headers=auth(world.users["mio_ust"]))
+
+    assert response.status_code == 409 and response.json()["detail"]["code"] == "analysis_not_failed"
+    db.refresh(ad)
+    assert ad.analysis_status is AnalysisStatus.done and ad.llm_status is LlmStatus.done
+
+
+def test_retry_analysis_runs_only_the_failed_llm_stage_and_reopens_review(
+    client: TestClient, db: Session, world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(get_settings(), "events_enabled", True)
+    calls: list[tuple[int, bool, bool]] = []
+
+    def queued(ad_post_id: int, *, capture: bool, requested_by: int | None, llm_only: bool = False) -> bool:
+        calls.append((ad_post_id, capture, llm_only))
+        return True
+
+    monkeypatch.setattr(service, "dispatch_pipeline", queued)
+    ad = add_ad(
+        db,
+        world.ust,
+        "Подтверждённый факт о бронировании",
+        capture_status=CaptureStatus.done,
+        ocr_status=OcrStatus.done,
+        analysis_status=AnalysisStatus.done,
+        llm_status=LlmStatus.failed,
+        payment_schemes=["booking"],
+        claimed_readiness_pct=75,
+        review_state=AdReviewState.reviewed,
+        reviewed_by=world.users["mio_ust"].id,
+        reviewed_at=datetime.now(UTC),
+        review_note="Сохранить заметку команды",
+    )
+    confirmed = hit(db, ad, PhraseCategory.booking, 0, 13, confirmed=True)
+
+    response = client.post(f"{ADS}/{ad.id}/retry-analysis", headers=auth(world.users["mio_ust"]))
+
+    assert response.status_code == 200, response.text
+    assert response.json()["analysis_status"] == "done" and response.json()["llm_status"] == "pending"
+    assert calls == [(ad.id, False, True)]
+    db.refresh(ad)
+    db.refresh(confirmed)
+    assert ad.review_state is AdReviewState.unreviewed
+    assert ad.reviewed_by is None and ad.reviewed_at is None
+    assert ad.review_note == "Сохранить заметку команды"
+    assert ad.payment_schemes == ["booking"] and ad.claimed_readiness_pct == 75
+    assert confirmed.confirmed is True
+    audit = db.scalars(
+        select(AuditLog).where(AuditLog.action == "ad.retry_analysis", AuditLog.entity_id == ad.id)
+    ).one()
+    assert audit.before["reviewed_by"] == world.users["mio_ust"].id
+    assert audit.after["review_state"] == "unreviewed" and audit.after["reviewed_by"] is None
+    assert audit.after["review_note"] == "Сохранить заметку команды"
+
+    duplicate = client.post(f"{ADS}/{ad.id}/retry-analysis", headers=auth(world.users["mio_ust"]))
+    assert duplicate.status_code == 409 and duplicate.json()["detail"]["code"] == "analysis_in_progress"
+
+
+def test_llm_only_queue_failure_is_visible_and_can_be_retried(
+    client: TestClient, db: Session, world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(get_settings(), "events_enabled", True)
+    results = iter([False, True])
+    monkeypatch.setattr(service, "dispatch_pipeline", lambda *args, **kwargs: next(results))
+    ad = add_ad(
+        db,
+        world.ust,
+        "Публикация с ошибкой модели",
+        capture_status=CaptureStatus.done,
+        ocr_status=OcrStatus.done,
+        analysis_status=AnalysisStatus.done,
+        llm_status=LlmStatus.failed,
+    )
+
+    failed = client.post(f"{ADS}/{ad.id}/retry-analysis", headers=auth(world.users["mio_ust"]))
+
+    assert failed.status_code == 200 and failed.json()["llm_status"] == "failed"
+    assert failed.json()["analysis_status"] == "done"
+    retried = client.post(f"{ADS}/{ad.id}/retry-analysis", headers=auth(world.users["mio_ust"]))
+    assert retried.status_code == 200 and retried.json()["llm_status"] == "pending"
+    assert retried.json()["analysis_status"] == "done"
 
 
 def test_retry_analysis_waits_for_handled_capture_failure_chain_to_finish(
@@ -862,6 +973,7 @@ def test_manual_ad_minimal_and_validation(client: TestClient, db: Session, world
     assert minimal.json()["is_outdoor"] is False and minimal.json()["evidence"] == []
     assert minimal.json()["ocr_status"] is None  # no photos to read
     assert minimal.json()["analysis_status"] is None  # async processing is disabled in the test environment
+    assert minimal.json()["llm_status"] == "none"
 
     def post(**changes: Any) -> Any:
         return client.post(f"{ADS}/manual", headers=headers, data={"text": "x", "platform": "other", **changes})

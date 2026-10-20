@@ -543,6 +543,7 @@ interface MockState {
   manualAd?: AdDetail;
   analysisRetryFailures?: number;
   analysisPollsRemaining?: number;
+  llmPollsRemaining?: number;
   triageFailure?: { state: AdReviewState; code: string; message: string };
   adListFailure?: { code: string; message: string };
   adListDelayMs?: number;
@@ -575,6 +576,7 @@ interface Harness {
   unexpected: string[];
   listRequests: URL[];
   adListRequests: URL[];
+  adDetailRequests: number[];
   objectListRequests: URL[];
   assignmentRequests: URL[];
   searchQueries: string[];
@@ -614,6 +616,7 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
     unexpected: [],
     listRequests: [],
     adListRequests: [],
+    adDetailRequests: [],
     objectListRequests: [],
     assignmentRequests: [],
     searchQueries: [],
@@ -914,21 +917,45 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
         return json(route, { detail: { code: 'temporary_failure', message: 'The retry could not be started.' } }, 503);
       }
       const current = state.ads.find((ad) => ad.id === adId) ?? state.ad;
-      const ad: AdDetail = {
-        ...current,
-        analysis_status: 'pending',
-        queue_reasons: [
-          ...current.queue_reasons.filter((reason) => reason !== 'analysis_pending' && reason !== 'analysis_failed'),
-          'analysis_pending',
-        ],
-      };
+      const hasFailure =
+        current.capture_status === 'failed' || current.ocr_status === 'failed' || current.llm_status === 'failed' || current.analysis_status === 'failed';
+      const hasPending =
+        current.capture_status === 'pending' || current.ocr_status === 'pending' || current.llm_status === 'pending' || current.analysis_status === 'pending';
+      if (!hasFailure || hasPending) return json(route, { detail: { code: 'retry_conflict', message: 'The publication is not ready for retry.' } }, 409);
+
+      const llmOnlyRetry =
+        current.llm_status === 'failed' && current.capture_status !== 'failed' && current.ocr_status !== 'failed' && current.analysis_status !== 'failed';
+      const ad: AdDetail = llmOnlyRetry
+        ? {
+          ...current,
+          llm_status: 'pending',
+          queue_reasons: [
+            ...current.queue_reasons.filter((reason) => reason !== 'llm_pending' && reason !== 'llm_failed'),
+            'llm_pending',
+          ],
+        }
+        : {
+          ...current,
+          analysis_status: 'pending',
+          llm_status: 'pending',
+          queue_reasons: [
+            ...current.queue_reasons.filter((reason) => reason !== 'analysis_pending' && reason !== 'analysis_failed' && reason !== 'llm_pending' && reason !== 'llm_failed'),
+            'analysis_pending',
+            'llm_pending',
+          ],
+        };
       state.ads = state.ads.map((item) => item.id === adId ? ad : item);
       if (state.ad.id === adId) state.ad = ad;
-      state.analysisPollsRemaining = 1;
+      if (llmOnlyRetry) state.llmPollsRemaining = 1;
+      else {
+        state.analysisPollsRemaining = 1;
+        state.llmPollsRemaining = 2;
+      }
       return json(route, ad);
     }
     if (method === 'GET' && /^\/ads\/\d+$/.test(path)) {
       const id = Number(path.split('/').at(-1));
+      harness.adDetailRequests.push(id);
       let ad = state.ads.find((item) => item.id === id) ?? state.ad;
       if (ad.id === id && ad.analysis_status === 'pending' && state.analysisPollsRemaining !== undefined) {
         if (state.analysisPollsRemaining > 0) {
@@ -938,6 +965,19 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
             ...ad,
             analysis_status: 'done',
             queue_reasons: ad.queue_reasons.filter((reason) => reason !== 'analysis_pending' && reason !== 'analysis_failed'),
+          };
+          state.ads = state.ads.map((item) => item.id === id ? ad : item);
+          if (state.ad.id === id) state.ad = ad;
+        }
+      }
+      if (ad.id === id && ad.llm_status === 'pending' && state.llmPollsRemaining !== undefined) {
+        if (state.llmPollsRemaining > 0) {
+          state.llmPollsRemaining -= 1;
+        } else {
+          ad = {
+            ...ad,
+            llm_status: 'done',
+            queue_reasons: ad.queue_reasons.filter((reason) => reason !== 'llm_pending' && reason !== 'llm_failed'),
           };
           state.ads = state.ads.map((item) => item.id === id ? ad : item);
           if (state.ad.id === id) state.ad = ad;
@@ -2701,7 +2741,7 @@ test('narrow ad selection is a URL-backed detail step that restores the filtered
   expectCleanBrowser(harness);
 });
 
-test('manual text-only analysis failure can be retried and blocks review until polling completes', async ({ page }) => {
+test('manual text-only analysis failure can be retried and blocks review until full polling completes', async ({ page }) => {
   const manualAd = makeReviewAd(88, {
     url: null,
     author: null,
@@ -2750,6 +2790,9 @@ test('manual text-only analysis failure can be retried and blocks review until p
   await expect
     .poll(() => harness.state.ads.find((ad) => ad.id === manualAd.id)?.analysis_status, { timeout: 10_000 })
     .toBe('done');
+  await expect
+    .poll(() => harness.state.ads.find((ad) => ad.id === manualAd.id)?.llm_status, { timeout: 10_000 })
+    .toBe('done');
   await expect(reviewed).toBeEnabled();
 
   const manualCreate = harness.mutations.find(({ method, path }) => method === 'POST' && path === '/ads/manual');
@@ -2758,6 +2801,148 @@ test('manual text-only analysis failure can be retried and blocks review until p
   expect(harness.mutations.filter(({ method, path }) => method === 'POST' && path === '/ads/88/retry-analysis')).toHaveLength(2);
   await reviewed.click();
   await expect.poll(() => harness.state.ads.find((ad) => ad.id === manualAd.id)?.review_state).toBe('reviewed');
+  expectCleanBrowser(harness);
+});
+
+test('failed LLM analysis can be retried without rerunning publication analysis', async ({ page }) => {
+  const ad = makeReviewAd(89, {
+    status: 'captured',
+    review_state: 'unreviewed',
+    review_note: null,
+    queue_reasons: ['llm_failed'],
+    capture_status: 'done',
+    capture_error: null,
+    ocr_status: null,
+    llm_status: 'failed',
+    analysis_status: 'done',
+    object_id: null,
+    object_name: null,
+    linked_object: null,
+    phrase_hits: [],
+  });
+  const harness = await installMocks(page, 'mio_officer', {
+    ad,
+    ads: [ad],
+    analysisRetryFailures: 1,
+    expectedApi503Responses: 1,
+  });
+
+  await page.goto('/ads?queue=true');
+  const card = page.getByRole('article', { name: t('ads:card.label', { id: ad.id }) });
+  const retry = card.getByRole('button', { name: t('ads:llm.retry'), exact: true });
+  const reviewed = page.getByRole('button', { name: t('ads:review.markReviewed'), exact: true });
+  const note = card.getByRole('textbox', { name: t('ads:review.noteLabel') });
+
+  await expect(card.getByRole('alert')).toContainText(t('ads:llm.statusFailed'));
+  await expect(card.getByRole('button', { name: t('ads:analysis.retry'), exact: true })).toHaveCount(0);
+  await expect(reviewed).toBeDisabled();
+  await expect(note).toHaveValue('');
+
+  await retry.click();
+  await expect(card.getByRole('alert').filter({ hasText: t('ads:llm.retryError') })).toBeVisible();
+  await expect(retry).toBeEnabled();
+
+  await retry.click();
+  await expect(card.getByText(t('ads:llm.statusPending'))).toBeVisible();
+  expect(harness.state.ads.find((item) => item.id === ad.id)?.analysis_status).toBe('done');
+  expect(harness.state.ads.find((item) => item.id === ad.id)?.llm_status).toBe('pending');
+  await expect(reviewed).toBeDisabled();
+
+  await expect.poll(() => harness.state.ads.find((item) => item.id === ad.id)?.llm_status, { timeout: 10_000 }).toBe('done');
+  await expect(reviewed).toBeEnabled();
+  await expect(note).toHaveValue('');
+  expect(harness.state.ads.find((item) => item.id === ad.id)?.analysis_status).toBe('done');
+  expect(harness.mutations.filter(({ method, path }) => method === 'POST' && path === `/ads/${ad.id}/retry-analysis`)).toHaveLength(2);
+  expectCleanBrowser(harness);
+});
+
+test('combined publication and LLM failures expose only the publication retry', async ({ page }) => {
+  const ad = makeReviewAd(91, {
+    status: 'captured',
+    review_state: 'unreviewed',
+    queue_reasons: ['analysis_failed', 'llm_failed'],
+    capture_status: 'done',
+    capture_error: null,
+    ocr_status: null,
+    llm_status: 'failed',
+    analysis_status: 'failed',
+    object_id: null,
+    object_name: null,
+    linked_object: null,
+    phrase_hits: [],
+  });
+  const harness = await installMocks(page, 'mio_officer', { ad, ads: [ad] });
+
+  await page.goto('/ads?queue=true');
+  const card = page.getByRole('article', { name: t('ads:card.label', { id: ad.id }) });
+  await expect(card.getByRole('button', { name: t('ads:analysis.retry'), exact: true })).toHaveCount(1);
+  await expect(card.getByRole('button', { name: t('ads:llm.retry'), exact: true })).toHaveCount(0);
+  expectCleanBrowser(harness);
+});
+
+test('LLM retry remains available for legacy ads without a mandatory analysis status', async ({ page }) => {
+  const ad = makeReviewAd(92, {
+    status: 'captured',
+    review_state: 'unreviewed',
+    queue_reasons: ['llm_failed'],
+    capture_status: 'done',
+    capture_error: null,
+    ocr_status: null,
+    llm_status: 'failed',
+    analysis_status: null,
+    object_id: null,
+    object_name: null,
+    linked_object: null,
+    phrase_hits: [],
+  });
+  const harness = await installMocks(page, 'mio_officer', { ad, ads: [ad] });
+
+  await page.goto('/ads?queue=true');
+  const card = page.getByRole('article', { name: t('ads:card.label', { id: ad.id }) });
+  const retry = card.getByRole('button', { name: t('ads:llm.retry'), exact: true });
+  await expect(retry).toBeVisible();
+  await retry.click();
+  await expect(card.getByText(t('ads:llm.statusPending'))).toBeVisible();
+  expect(harness.state.ads.find((item) => item.id === ad.id)?.analysis_status).toBeNull();
+  expect(harness.state.ads.find((item) => item.id === ad.id)?.llm_status).toBe('pending');
+  expectCleanBrowser(harness);
+});
+
+test('pending LLM work polls after required analysis is done without a focus change', async ({ page }) => {
+  const ad = makeReviewAd(90, {
+    status: 'captured',
+    review_state: 'unreviewed',
+    queue_reasons: ['llm_pending'],
+    capture_status: 'done',
+    capture_error: null,
+    ocr_status: null,
+    llm_status: 'pending',
+    analysis_status: 'done',
+    object_id: null,
+    object_name: null,
+    linked_object: null,
+    phrase_hits: [],
+  });
+  const harness = await installMocks(page, 'mio_officer', {
+    ad,
+    ads: [ad],
+    llmPollsRemaining: 1,
+  });
+
+  await page.goto('/ads?queue=true');
+  const card = page.getByRole('article', { name: t('ads:card.label', { id: ad.id }) });
+  const reviewed = page.getByRole('button', { name: t('ads:review.markReviewed'), exact: true });
+  await expect(card.getByText(t('ads:llm.statusPending'))).toBeVisible();
+  await expect(reviewed).toBeDisabled();
+  expect(harness.state.ads.find((item) => item.id === ad.id)?.analysis_status).toBe('done');
+
+  const initialListRequests = harness.adListRequests.length;
+  const initialDetailRequests = harness.adDetailRequests.filter((id) => id === ad.id).length;
+  await expect.poll(() => harness.adListRequests.length, { timeout: 10_000 }).toBeGreaterThan(initialListRequests);
+  await expect.poll(() => harness.adDetailRequests.filter((id) => id === ad.id).length, { timeout: 10_000 }).toBeGreaterThan(initialDetailRequests);
+  await expect.poll(() => harness.state.ads.find((item) => item.id === ad.id)?.llm_status, { timeout: 10_000 }).toBe('done');
+  await expect(reviewed).toBeEnabled();
+  expect(harness.state.ads.find((item) => item.id === ad.id)?.analysis_status).toBe('done');
   expectCleanBrowser(harness);
 });
 

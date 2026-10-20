@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 from celery import chain
 from fastapi import Request
-from sqlalchemy import func, or_, select, tuple_, update
+from sqlalchemy import case, func, or_, select, tuple_, update
 from sqlalchemy.orm import Session
 
 from app import audit, storage
@@ -36,6 +36,7 @@ from app.models.enums import (
     AnalysisStatus,
     CaptureStatus,
     EvidenceKind,
+    LlmStatus,
     NotificationKind,
     OcrStatus,
     Platform,
@@ -102,6 +103,11 @@ def queue_reasons(ad: AdPost, has_unreviewed_hits: bool) -> list[AdQueueReason]:
 def analysis_status_for_dispatch() -> AnalysisStatus | None:
     """Track mandatory processing only when this deployment actually queues asynchronous work."""
     return AnalysisStatus.pending if get_settings().events_enabled else None
+
+
+def llm_status_for_dispatch() -> LlmStatus:
+    """Reserve the LLM stage for queued work; new posts stay at `none` when event processing is off."""
+    return LlmStatus.pending if get_settings().events_enabled else LlmStatus.none
 
 
 def duplicate_metadata(
@@ -271,6 +277,7 @@ def create_manual_ad(
         unlinked_territory_id=fields.get("territory_id"),
         unlinked_territory_saved=True,
         analysis_status=analysis_status_for_dispatch(),
+        llm_status=llm_status_for_dispatch(),
         origin=origin,
         **fields,
     )
@@ -301,21 +308,27 @@ def create_manual_ad(
     return ad
 
 
-def dispatch_pipeline(ad_post_id: int, *, capture: bool, requested_by: int | None) -> bool:
-    """Queue the pipeline of a new publication (SPEC 5, 10.2): capture (when it has a URL), OCR, analyze, link, LLM.
+def dispatch_pipeline(
+    ad_post_id: int, *, capture: bool, requested_by: int | None, llm_only: bool = False
+) -> bool:
+    """Queue either the full publication pipeline or just its failed LLM stage.
 
     Call after the post is committed. Returns False when the broker is unreachable; the request whose data is
     already saved must not fail because of it.
     """
     if not get_settings().events_enabled:
         return True
-    steps: list[tuple[str, str, list[int | None]]] = [
-        ("nlp.ocr", "nlp", [ad_post_id]),
-        ("nlp.analyze", "nlp", [ad_post_id]),
-        ("nlp.link", "nlp", [ad_post_id]),
-        ("nlp.llm_extract", "nlp", [ad_post_id]),
-    ]
-    if capture:
+    steps: list[tuple[str, str, list[int | None]]] = (
+        [("nlp.llm_extract", "nlp", [ad_post_id])]
+        if llm_only
+        else [
+            ("nlp.ocr", "nlp", [ad_post_id]),
+            ("nlp.analyze", "nlp", [ad_post_id]),
+            ("nlp.link", "nlp", [ad_post_id]),
+            ("nlp.llm_extract", "nlp", [ad_post_id]),
+        ]
+    )
+    if capture and not llm_only:
         steps.insert(0, ("archive.capture", "archive", [ad_post_id, requested_by]))
     try:
         chain(
@@ -328,7 +341,7 @@ def dispatch_pipeline(ad_post_id: int, *, capture: bool, requested_by: int | Non
 
 
 def mark_capture_unqueued(session: Session, ad: AdPost) -> None:
-    """The pipeline could not be queued, so end its pending capture, OCR, and analysis states as failed."""
+    """The full pipeline could not be queued, so end its reserved pending states as failed."""
     session.execute(
         update(AdPost)
         .where(AdPost.id == ad.id, AdPost.capture_status == CaptureStatus.pending)
@@ -342,7 +355,24 @@ def mark_capture_unqueued(session: Session, ad: AdPost) -> None:
     session.execute(
         update(AdPost)
         .where(AdPost.id == ad.id, AdPost.analysis_status == AnalysisStatus.pending)
-        .values(analysis_status=AnalysisStatus.failed)
+        .values(
+            analysis_status=AnalysisStatus.failed,
+            llm_status=case(
+                (AdPost.llm_status == LlmStatus.pending, LlmStatus.failed),
+                else_=AdPost.llm_status,
+            ),
+        )
+    )
+    session.refresh(ad)
+    session.commit()
+
+
+def mark_llm_unqueued(session: Session, ad: AdPost) -> None:
+    """The LLM-only retry could not be queued, so end only its reserved pending stage as failed."""
+    session.execute(
+        update(AdPost)
+        .where(AdPost.id == ad.id, AdPost.llm_status == LlmStatus.pending)
+        .values(llm_status=LlmStatus.failed)
     )
     session.refresh(ad)
     session.commit()
@@ -452,6 +482,7 @@ def ingest_collected_post(
         capture_status=CaptureStatus.pending if capture and post.url else None,
         origin=AdOrigin.collector,
         analysis_status=analysis_status_for_dispatch(),
+        llm_status=llm_status_for_dispatch(),
     )
     session.add(ad)
     session.flush()

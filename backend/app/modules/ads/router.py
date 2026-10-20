@@ -197,6 +197,8 @@ def capture_ad(
         existing.capture_status = CaptureStatus.pending
         existing.capture_error = None
         existing.analysis_status = service.analysis_status_for_dispatch()
+        if get_settings().events_enabled:
+            existing.llm_status = LlmStatus.pending
         audit.record(session, user, "ad.recapture", "ad_post", existing.id, before, audit.snapshot(existing), request)
         session.commit()
         if not service.dispatch_pipeline(existing.id, capture=True, requested_by=user.id):
@@ -215,6 +217,7 @@ def capture_ad(
         unlinked_territory_id=fields.get("territory_id"),
         unlinked_territory_saved=True,
         analysis_status=service.analysis_status_for_dispatch(),
+        llm_status=service.llm_status_for_dispatch(),
         origin=AdOrigin.capture,
         **fields,
     )
@@ -315,8 +318,6 @@ def retry_analysis(
     ad_id: int, session: SessionDep, user: StaffUser, scope: ScopeDep, request: Request
 ) -> AdDetail:
     ad = service.get_ad_in_scope(session, scope, ad_id, for_update=True)
-    if not get_settings().events_enabled:
-        raise api_error(503, "queue_unavailable", "Очередь обработки отключена")
     if (
         ad.analysis_status is AnalysisStatus.pending
         or ad.capture_status is CaptureStatus.pending
@@ -324,20 +325,49 @@ def retry_analysis(
         or ad.llm_status is LlmStatus.pending
     ):
         raise api_error(409, "analysis_in_progress", "Обработка публикации уже выполняется")
+    if not any(
+        status is failed
+        for status, failed in (
+            (ad.capture_status, CaptureStatus.failed),
+            (ad.ocr_status, OcrStatus.failed),
+            (ad.analysis_status, AnalysisStatus.failed),
+            (ad.llm_status, LlmStatus.failed),
+        )
+    ):
+        raise api_error(409, "analysis_not_failed", "Нет ошибок обработки, требующих повтора")
+    if not get_settings().events_enabled:
+        raise api_error(503, "queue_unavailable", "Очередь обработки отключена")
 
     before = audit.snapshot(ad)
-    ad.analysis_status = AnalysisStatus.pending
+    llm_only = (
+        ad.llm_status is LlmStatus.failed
+        and ad.capture_status is not CaptureStatus.failed
+        and ad.ocr_status is not OcrStatus.failed
+        and ad.analysis_status is not AnalysisStatus.failed
+    )
+    if ad.review_state is AdReviewState.reviewed:
+        ad.review_state = AdReviewState.unreviewed
+        ad.reviewed_by = None
+        ad.reviewed_at = None
+    if llm_only:
+        ad.llm_status = LlmStatus.pending
+    else:
+        ad.analysis_status = AnalysisStatus.pending
+        ad.llm_status = LlmStatus.pending
     retry_capture = ad.url is not None and ad.capture_status is CaptureStatus.failed
-    if retry_capture:
+    if retry_capture and not llm_only:
         ad.capture_status = CaptureStatus.pending
         ad.capture_error = None
-    if ad.ocr_status is OcrStatus.failed:
+    if ad.ocr_status is OcrStatus.failed and not llm_only:
         ad.ocr_status = OcrStatus.pending
     session.flush()
     audit.record(session, user, "ad.retry_analysis", "ad_post", ad.id, before, audit.snapshot(ad), request)
     session.commit()
-    if not service.dispatch_pipeline(ad.id, capture=retry_capture, requested_by=user.id):
-        service.mark_capture_unqueued(session, ad)
+    if not service.dispatch_pipeline(ad.id, capture=retry_capture, requested_by=user.id, llm_only=llm_only):
+        if llm_only:
+            service.mark_llm_unqueued(session, ad)
+        else:
+            service.mark_capture_unqueued(session, ad)
     return service.build_detail(session, ad, scope)
 
 

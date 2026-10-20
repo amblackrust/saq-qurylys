@@ -27,6 +27,7 @@ from app.models.enums import (
     AnalysisStatus,
     CaptureStatus,
     EvidenceKind,
+    LlmStatus,
     NotificationKind,
     Platform,
 )
@@ -123,6 +124,7 @@ def test_unhandled_archive_capture_failure_marks_mandatory_pipeline_failed(
         url="https://alatau.test/post",
         capture_status=capture_status,
         analysis_status=analysis_status,
+        llm_status=LlmStatus.pending,
     )
     monkeypatch.setattr(tasks, "get_sessionmaker", lambda: SessionFactory(db))
 
@@ -137,6 +139,35 @@ def test_unhandled_archive_capture_failure_marks_mandatory_pipeline_failed(
     db.refresh(ad)
     assert ad.capture_status is expected_capture_status
     assert ad.analysis_status is AnalysisStatus.failed
+    assert ad.llm_status is LlmStatus.failed
+
+
+def test_late_capture_failure_does_not_fail_an_llm_only_retry(
+    db: Session, world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ad = add_ad(
+        db,
+        world.ust,
+        "Уже обработанная публикация",
+        url="https://alatau.test/post",
+        capture_status=CaptureStatus.done,
+        analysis_status=AnalysisStatus.done,
+        llm_status=LlmStatus.pending,
+    )
+    monkeypatch.setattr(tasks, "get_sessionmaker", lambda: SessionFactory(db))
+
+    def fail(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("late duplicate failure")
+
+    monkeypatch.setattr(tasks, "capture_ad", fail)
+
+    with pytest.raises(RuntimeError, match="late duplicate failure"):
+        tasks.capture(ad.id)
+
+    db.refresh(ad)
+    assert ad.capture_status is CaptureStatus.done
+    assert ad.analysis_status is AnalysisStatus.done
+    assert ad.llm_status is LlmStatus.pending
 
 
 # ---------------------------------------------------------------- pipeline dispatch
@@ -167,6 +198,7 @@ def test_pipeline_is_a_chain_of_immutable_steps_on_their_queues(monkeypatch: pyt
 
     assert service.dispatch_pipeline(7, capture=True, requested_by=3) is True
     assert service.dispatch_pipeline(8, capture=False, requested_by=None) is True
+    assert service.dispatch_pipeline(9, capture=False, requested_by=None, llm_only=True) is True
 
     assert describe(chains[0]) == [
         ("archive.capture", (7, 3), "archive", True),
@@ -176,6 +208,7 @@ def test_pipeline_is_a_chain_of_immutable_steps_on_their_queues(monkeypatch: pyt
         ("nlp.llm_extract", (7,), "nlp", True),
     ]
     assert [step[0] for step in describe(chains[1])] == ["nlp.ocr", "nlp.analyze", "nlp.link", "nlp.llm_extract"]
+    assert describe(chains[2]) == [("nlp.llm_extract", (9,), "nlp", True)]
     assert chains[0].options == {"retry": False}
 
 

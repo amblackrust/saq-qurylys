@@ -1,8 +1,9 @@
 import { IconAlertTriangle, IconSparkles } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useAcceptLlm } from '@/api/hooks/ads';
+import { useAcceptLlm, useRetryAdAnalysis } from '@/api/hooks/ads';
 import type { AdRow, LlmExtraction } from '@/api/types';
+import { errorMessage } from '@/api/queryClient';
 import { Chip } from '@/components/Chip';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
@@ -42,7 +43,40 @@ export function LlmPanel({ ad, extraction, editable }: Props) {
   const { t } = useTranslation('ads');
   const e = useEnum();
   const acceptLlm = useAcceptLlm();
+  const retry = useRetryAdAnalysis();
+  const retryError = retry.isError && retry.variables === ad.id;
+  const canRetryLlm =
+    ad.analysis_status !== 'pending' && ad.analysis_status !== 'failed' &&
+    ad.capture_status !== 'pending' && ad.capture_status !== 'failed' &&
+    ad.ocr_status !== 'pending' && ad.ocr_status !== 'failed';
   const [accepted, setAccepted] = useState(false);
+
+  if (ad.llm_status === 'failed') {
+    return (
+      <div className="flex min-w-0 flex-col items-start gap-2">
+        <StatusLine status={ad.llm_status} />
+        {editable && canRetryLlm && (
+          <>
+            <Button
+              size="xs"
+              variant="secondary"
+              className="max-sm:min-h-11"
+              loading={retry.isPending}
+              disabled={retry.isPending}
+              onClick={() => retry.mutate(ad.id)}
+            >
+              {t('llm.retry')}
+            </Button>
+            {retryError && (
+              <p className="m-0 text-sm text-zone-red-ink" role="alert">
+                {t('llm.retryError')} {errorMessage(retry.error)}
+              </p>
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
 
   if (ad.llm_status !== 'done') return <StatusLine status={ad.llm_status} />;
   if (!extraction) return null;

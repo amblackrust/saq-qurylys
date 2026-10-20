@@ -48,6 +48,8 @@ function AnalysisStatus({ ad, editable }: { ad: AdRow; editable: boolean }) {
   const { t } = useTranslation('ads');
   const retry = useRetryAdAnalysis();
   const retryError = retry.isError && retry.variables === ad.id;
+  const retryBlockedByProcessing =
+    ad.capture_status === 'pending' || ad.ocr_status === 'pending' || ad.llm_status === 'pending';
 
   if (ad.analysis_status === null || ad.analysis_status === 'done') return null;
 
@@ -70,7 +72,7 @@ function AnalysisStatus({ ad, editable }: { ad: AdRow; editable: boolean }) {
               variant="secondary"
               className="self-start max-sm:min-h-11"
               loading={retry.isPending}
-              disabled={retry.isPending}
+              disabled={retry.isPending || retryBlockedByProcessing}
               onClick={() => retry.mutate(ad.id)}
             >
               {t('analysis.retry')}
