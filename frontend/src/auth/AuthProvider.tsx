@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, getToken, setToken, setUnauthorizedHandler } from '@/api/client';
 import { qk } from '@/api/keys';
@@ -9,6 +9,7 @@ import { AuthContext, type AuthState } from './context';
 export function AuthProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const [token, setTokenState] = useState<string | null>(getToken);
+  const sessionGeneration = useRef(0);
 
   const me = useQuery({
     queryKey: qk.me,
@@ -18,7 +19,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     staleTime: Infinity,
   });
 
-  const endSession = useCallback(() => {
+  const endSession = useCallback((expectedGeneration?: number) => {
+    if (expectedGeneration !== undefined && sessionGeneration.current !== expectedGeneration) return;
+    sessionGeneration.current += 1;
     setToken(null);
     setTokenState(null);
     qc.clear();
@@ -26,9 +29,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // The server revokes the user's tokens on every device; the local session ends even if that request fails.
   const logout = useCallback(() => {
+    const logoutToken = getToken();
+    const generation = sessionGeneration.current;
     api<void>('/auth/logout', { method: 'POST' })
       .catch((err: unknown) => console.error('Logout request failed', err))
-      .finally(endSession);
+      .finally(() => {
+        if (getToken() === logoutToken) endSession(generation);
+      });
   }, [endSession]);
 
   // Any 401 from the API (expired or revoked token) sends the user back to the login screen.
@@ -40,6 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(
     async (username: string, password: string) => {
       const response = await api<LoginResponse>('/auth/login', { method: 'POST', body: { username, password } });
+      sessionGeneration.current += 1;
       setToken(response.access_token);
       setTokenState(response.access_token);
       qc.setQueryData(qk.me, response.user);
