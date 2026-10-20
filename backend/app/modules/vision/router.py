@@ -594,6 +594,8 @@ def publish_ad(
     if body.object_id is not None:
         # The link is made only by the person who passed the object.
         obj = get_object_in_scope(session, scope, body.object_id)
+        if obj.territory_id != vision_session.territory_id:
+            raise api_error(422, "territory_mismatch", "Территория не совпадает с территорией сессии")
         fields = {
             "object_id": obj.id,
             "territory_id": obj.territory_id,

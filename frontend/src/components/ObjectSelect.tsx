@@ -7,15 +7,16 @@ import { useDebouncedValue } from '@/lib/hooks';
 interface Props extends FieldProps {
   value: number | null;
   onChange: (id: number | null) => void;
+  territoryId?: number;
   placeholder?: string;
   disabled?: boolean;
 }
 
 /** Searchable object picker backed by `GET /objects?q=`. */
-export function ObjectSelect({ value, onChange, ...rest }: Props) {
+export function ObjectSelect({ value, onChange, territoryId, ...rest }: Props) {
   const [search, setSearch] = useState('');
   const [debounced] = useDebouncedValue(search, 250);
-  const { data, isFetching } = useObjects({ q: debounced || undefined, limit: 20 });
+  const { data, isFetching } = useObjects({ q: debounced || undefined, limit: 20, territory_id: territoryId });
 
   const options = useMemo(
     () => (data?.items ?? []).map((item) => ({ value: String(item.id), label: `${item.code} · ${item.name}` })),

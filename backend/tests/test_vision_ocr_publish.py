@@ -408,6 +408,24 @@ def test_publish_access(client: TestClient, db: Session, world: World) -> None:
     assert db.scalar(select(func.count()).select_from(AdPost).where(AdPost.origin == AdOrigin.vision)) == 0
 
 
+def test_publish_rejects_object_from_another_city_in_the_same_scope(
+    client: TestClient, db: Session, world: World
+) -> None:
+    user = world.users["mio_region"]
+    session_object = make_object(db, world.ust)
+    selected_object = make_object(db, world.semey)
+    finding = confirmed_finding(client, db, user, object_id=session_object.id)
+
+    response = publish(client, user, finding["id"], object_id=selected_object.id)
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "territory_mismatch"
+    assert db.scalar(select(func.count()).select_from(AdPost).where(AdPost.origin == AdOrigin.vision)) == 0
+    assert db.scalar(select(func.count()).select_from(Evidence).where(Evidence.ad_post_id.is_not(None))) == 0
+    row = db.get(VisionFinding, finding["id"])
+    assert row is not None and row.ad_post_id is None and row.confirmed_text is None
+
+
 def test_publication_does_not_score_by_itself(
     client: TestClient, db: Session, world: World, sent_tasks: list[tuple[str, tuple[object, ...]]]
 ) -> None:

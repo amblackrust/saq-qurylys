@@ -51,7 +51,13 @@ function ObjectField({ session }: { session: VisionSessionDetail }) {
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-80 gap-3 p-3">
-          <ObjectSelect label={t('new.object')} placeholder={t('new.objectPlaceholder')} value={draft} onChange={setDraft} />
+          <ObjectSelect
+            label={t('new.object')}
+            placeholder={t('new.objectPlaceholder')}
+            value={draft}
+            onChange={setDraft}
+            territoryId={session.territory_id ?? undefined}
+          />
           <div className="flex justify-end gap-2">
             <Button variant="secondary" size="sm" onClick={() => setOpened(false)}>
               {tc('cancel')}

@@ -79,7 +79,13 @@ export function OutdoorAdBox({ finding, session, config }: Props) {
             value={text}
             onChange={(event) => setDraft(event.target.value)}
           />
-          <ObjectSelect label={t('publish.object')} placeholder={t('publish.objectPlaceholder')} value={objectId} onChange={setObjectId} />
+          <ObjectSelect
+            label={t('publish.object')}
+            placeholder={t('publish.objectPlaceholder')}
+            value={objectId}
+            onChange={setObjectId}
+            territoryId={session.territory_id ?? undefined}
+          />
           <div className="flex flex-wrap items-center gap-2">
             <Button
               size="sm"
