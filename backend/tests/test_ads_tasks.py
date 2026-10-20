@@ -8,6 +8,7 @@ import uuid
 from collections.abc import Callable, Iterable, Iterator
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -33,6 +34,7 @@ from app.modules.ads.urls import UnsafeUrlError, ensure_public_url, telegram_emb
 from app.modules.nlp import service as nlp
 from app.modules.risk import engine
 from app.modules.risk import service as risk
+from app.modules.settings.service import load_settings
 from app.storage import EvidenceLink
 from tests.conftest import PNG_BYTES, World, make_object
 from tests.support_ads import add_ad
@@ -347,21 +349,72 @@ def test_recheck_task_reports_the_changed_objects(db: Session, monkeypatch: pyte
     assert changed == [5, 6, 6, 7]
 
 
-def test_claimed_readiness_of_all_objects_follows_the_ad_window(db: Session, world: World) -> None:
-    now = datetime.now(UTC)
+def test_claimed_readiness_of_all_objects_follows_the_ad_window(
+    db: Session, world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = datetime(2026, 10, 20, 12, tzinfo=UTC)
+
+    monkeypatch.setattr(service, "datetime", SimpleNamespace(now=lambda _tz: now))
     fresh = make_object(db, world.ust, "Свежая заявка")
+    upper_edge = make_object(db, world.ust, "Верхняя граница")
+    created_fallback = make_object(db, world.ust, "Дата добавления")
     stale = make_object(db, world.ust, "Старая заявка", readiness_claimed_pct=80)
     quiet = make_object(db, world.ust, "Без рекламы")
     unchanged = make_object(db, world.ust, "Без изменений", readiness_claimed_pct=30)
-    add_ad(db, world.ust, object_id=fresh.id, claimed_readiness_pct=50, published_at=now - timedelta(days=1))
-    add_ad(db, world.ust, object_id=fresh.id, claimed_readiness_pct=35, published_at=now - timedelta(days=2))
-    add_ad(db, world.ust, object_id=stale.id, claimed_readiness_pct=80, published_at=now - timedelta(days=60))
+    window_days = load_settings(db).ad_window_days
+    window_start = now - timedelta(days=window_days)
+    add_ad(db, world.ust, object_id=fresh.id, claimed_readiness_pct=70, published_at=window_start)
+    add_ad(db, world.ust, object_id=fresh.id, claimed_readiness_pct=40, published_at=now - timedelta(days=1))
+    add_ad(
+        db,
+        world.ust,
+        object_id=fresh.id,
+        claimed_readiness_pct=100,
+        status=AdStatus.verification,
+        published_at=now - timedelta(days=1),
+    )
+    add_ad(
+        db,
+        world.ust,
+        object_id=fresh.id,
+        claimed_readiness_pct=110,
+        published_at=now + timedelta(days=90),
+        captured_at=now - timedelta(days=window_days + 10),
+    )
+    add_ad(
+        db,
+        world.ust,
+        object_id=upper_edge.id,
+        claimed_readiness_pct=65,
+        status=AdStatus.removed_saved,
+        captured_at=now,
+    )
+    add_ad(
+        db,
+        world.ust,
+        object_id=upper_edge.id,
+        claimed_readiness_pct=20,
+        published_at=now - timedelta(days=1),
+    )
+    add_ad(db, world.ust, object_id=created_fallback.id, claimed_readiness_pct=55, created_at=window_start)
+    add_ad(
+        db,
+        world.ust,
+        object_id=stale.id,
+        claimed_readiness_pct=80,
+        published_at=now - timedelta(days=window_days + 1),
+    )
     add_ad(db, world.ust, object_id=unchanged.id, claimed_readiness_pct=30, published_at=now - timedelta(days=1))
 
     changed = service.refresh_all_claimed_readiness(db)
 
-    assert sorted(changed) == sorted([fresh.id, stale.id])
-    assert (fresh.readiness_claimed_pct, stale.readiness_claimed_pct) == (50, None)
+    assert sorted(changed) == sorted([fresh.id, upper_edge.id, created_fallback.id, stale.id])
+    assert (fresh.readiness_claimed_pct, upper_edge.readiness_claimed_pct, created_fallback.readiness_claimed_pct) == (
+        70,
+        65,
+        55,
+    )
+    assert stale.readiness_claimed_pct is None
     assert quiet.readiness_claimed_pct is None and unchanged.readiness_claimed_pct == 30
 
 

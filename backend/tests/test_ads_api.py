@@ -795,6 +795,28 @@ def test_confirmed_fields_feed_the_claimed_readiness_of_the_object(
     assert stale.claimed_readiness_pct == 90
 
 
+def test_confirming_a_verification_ad_refreshes_claimed_readiness(
+    client: TestClient, db: Session, world: World
+) -> None:
+    obj = make_object(db, world.ust)
+    ad = add_ad(
+        db,
+        world.ust,
+        object_id=obj.id,
+        status=AdStatus.verification,
+        claimed_readiness_pct=85,
+        published_at=datetime.now(UTC) - timedelta(days=1),
+    )
+    headers = auth(world.users["mio_ust"])
+
+    response = client.patch(f"{ADS}/{ad.id}", headers=headers, json={"status": "captured"})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "captured"
+    db.refresh(obj)
+    assert obj.readiness_claimed_pct == 85
+
+
 def test_status_changes_track_the_removal_time(client: TestClient, db: Session, world: World) -> None:
     ad = add_ad(db, world.ust)
     headers = auth(world.users["mio_ust"])

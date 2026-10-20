@@ -55,6 +55,7 @@ from app.modules.evidence.schemas import EvidenceOut
 from app.modules.nlp.llm import Extraction
 from app.modules.nlp.service import finding_for_hit
 from app.modules.nlp.text import strip_ocr_marker
+from app.modules.risk.queries import AD_TIMESTAMP
 from app.modules.settings.service import load_settings
 from app.modules.signals.notifications import add_notifications, users_covering_territory
 from app.scope import TerritoryScope
@@ -333,11 +334,13 @@ def refresh_claimed_readiness(session: Session, object_id: int) -> bool:
     obj = session.get(ConstructionObject, object_id)
     if obj is None:
         return False
-    window_start = datetime.now(UTC) - timedelta(days=load_settings(session).ad_window_days)
+    now = datetime.now(UTC)
+    window_start = now - timedelta(days=load_settings(session).ad_window_days)
     claimed = session.scalar(
         select(func.max(AdPost.claimed_readiness_pct)).where(
             AdPost.object_id == object_id,
-            func.coalesce(AdPost.published_at, AdPost.captured_at, AdPost.created_at) >= window_start,
+            AD_TIMESTAMP.between(window_start, now),
+            AdPost.status != AdStatus.verification,
         )
     )
     if claimed == obj.readiness_claimed_pct:

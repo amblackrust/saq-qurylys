@@ -12,7 +12,7 @@ from app.errors import api_error
 from app.events import object_changed, objects_changed
 from app.geo import make_point
 from app.models import AdPost, ConstructionObject, Developer, District, Document, Territory
-from app.models.enums import DocType, Zone
+from app.models.enums import AdStatus, DocType, Zone
 from app.modules.complaints.schemas import ComplaintOut
 from app.modules.developers.schemas import DeveloperOut
 from app.modules.documents.schemas import DocumentOut
@@ -35,7 +35,7 @@ from app.modules.objects.service import (
     object_rows_stmt,
 )
 from app.modules.risk.engine import DocumentFact, document_statuses, legal_basis_status
-from app.modules.risk.queries import latest_score_stmt
+from app.modules.risk.queries import AD_TIMESTAMP, latest_score_stmt
 from app.modules.settings.service import load_settings
 from app.schemas import Page
 from app.uploads import read_csv_upload
@@ -213,13 +213,15 @@ def to_row(obj: ConstructionObject, developer_name: str | None, district_name: s
 def build_detail(session: SessionDep, obj: ConstructionObject) -> ObjectDetail:
     developer = session.get(Developer, obj.developer_id) if obj.developer_id else None
     district = session.get(District, obj.district_id) if obj.district_id else None
-    window_start = datetime.now(UTC) - timedelta(days=load_settings(session).ad_window_days)
+    now = datetime.now(UTC)
+    window_start = now - timedelta(days=load_settings(session).ad_window_days)
     ads_count = session.scalar(
         select(func.count())
         .select_from(AdPost)
         .where(
             AdPost.object_id == obj.id,
-            func.coalesce(AdPost.published_at, AdPost.captured_at, AdPost.created_at) >= window_start,
+            AD_TIMESTAMP.between(window_start, now),
+            AdPost.status != AdStatus.verification,
         )
     )
     latest = session.scalar(latest_score_stmt(obj.id))

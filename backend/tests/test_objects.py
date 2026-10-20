@@ -1,14 +1,18 @@
 import re
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.models import AdPost, AuditLog, ConstructionObject, RiskScore
-from app.models.enums import KeyStatus, Platform, ScoreTrigger, Zone
+from app.models.enums import AdStatus, KeyStatus, Platform, ScoreTrigger, Zone
+from app.modules.objects import router as objects_router
+from app.modules.settings.service import load_settings
 from tests.conftest import World, auth, make_object
 
 CODE_PATTERN = re.compile(r"^SQ-OBJ-\d{4,}$")
@@ -173,13 +177,38 @@ def test_stalled_key_status_detail(client: TestClient, db: Session, world: World
     assert row["key_status_detail"] == {"stalled_days": 45}
 
 
-def test_detail_reports_recent_ads_gap_and_latest_score(client: TestClient, db: Session, world: World) -> None:
+def test_detail_reports_recent_ads_gap_and_latest_score(
+    client: TestClient, db: Session, world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
     obj = make_object(db, world.ust, readiness_actual_pct=30, readiness_claimed_pct=55)
-    now = datetime.now(UTC)
+    now = datetime(2026, 10, 20, 12, tzinfo=UTC)
+
+    monkeypatch.setattr(objects_router, "datetime", SimpleNamespace(now=lambda _tz: now))
+    window_days = load_settings(db).ad_window_days
+    window_start = now - timedelta(days=window_days)
     db.add_all(
         [
-            AdPost(platform=Platform.instagram, object_id=obj.id, published_at=now - timedelta(days=2)),
-            AdPost(platform=Platform.instagram, object_id=obj.id, published_at=now - timedelta(days=40)),
+            AdPost(platform=Platform.instagram, object_id=obj.id, published_at=window_start),
+            AdPost(
+                platform=Platform.instagram,
+                object_id=obj.id,
+                published_at=None,
+                captured_at=now,
+                status=AdStatus.removed_saved,
+            ),
+            AdPost(platform=Platform.instagram, object_id=obj.id, created_at=now - timedelta(days=1)),
+            AdPost(
+                platform=Platform.instagram,
+                object_id=obj.id,
+                published_at=now + timedelta(days=90),
+                captured_at=now - timedelta(days=window_days + 10),
+            ),
+            AdPost(platform=Platform.instagram, object_id=obj.id, published_at=now, status=AdStatus.verification),
+            AdPost(
+                platform=Platform.instagram,
+                object_id=obj.id,
+                published_at=window_start - timedelta(microseconds=1),
+            ),
         ]
     )
     db.add_all(
@@ -205,7 +234,7 @@ def test_detail_reports_recent_ads_gap_and_latest_score(client: TestClient, db: 
     )
     db.flush()
     body = client.get(f"/api/v1/objects/{obj.id}", headers=auth(world.users["mio_ust"])).json()
-    assert body["ads_7d_count"] == 1
+    assert body["ads_7d_count"] == 3
     assert body["readiness_gap_pp"] == 25
     assert body["latest_score"]["score"] == 75
     assert body["latest_score"]["zone_reasons"] == ["no_permit"]
