@@ -212,6 +212,8 @@ def capture_ad(
         author=handle_from_url(platform, url),
         source_account_id=source.id if source else None,
         capture_status=CaptureStatus.pending,
+        unlinked_territory_id=fields.get("territory_id"),
+        unlinked_territory_saved=True,
         analysis_status=service.analysis_status_for_dispatch(),
         origin=AdOrigin.capture,
         **fields,
@@ -417,6 +419,36 @@ def update_ad(
 ) -> AdDetail:
     ad = service.get_ad_in_scope(session, scope, ad_id, for_update=True)
     changes = body.model_dump(exclude_unset=True)
+    unlinking = "object_id" in changes and changes["object_id"] is None and ad.object_id is not None
+    if "territory_id" in changes and not unlinking:
+        raise api_error(422, "territory_unlink_only", "Территорию можно указать только при снятии связи с объектом")
+
+    restore_territory_id: int | None = None
+    if unlinking:
+        baseline = ad.unlinked_territory_id
+        baseline_saved = ad.unlinked_territory_saved
+        requested_territory_id = changes.get("territory_id")
+        if not baseline_saved:
+            if requested_territory_id is None:
+                raise api_error(422, "unlink_territory_required", "Укажите город публикации перед снятием связи")
+            restore_territory_id = requested_territory_id
+        else:
+            if "territory_id" in changes and requested_territory_id != baseline:
+                raise api_error(422, "unlink_territory_mismatch", "Территория должна совпадать с исходной")
+            restore_territory_id = baseline
+        if restore_territory_id is None:
+            if not scope.is_unrestricted:
+                raise api_error(404, "territory_not_found", "Территория не найдена")
+        else:
+            territory = session.get(Territory, restore_territory_id)
+            if territory is None or not scope.contains(territory.id):
+                raise api_error(404, "territory_not_found", "Территория не найдена")
+        changes.pop("territory_id", None)
+
+    new_object = None
+    if "object_id" in changes and changes["object_id"] is not None:
+        new_object = get_object_in_scope(session, scope, changes["object_id"])
+
     before = audit.snapshot(ad)
     manually_selected_object = "object_id" in changes and changes["object_id"] is not None
     previous_object_id = ad.object_id
@@ -431,10 +463,18 @@ def update_ad(
             ad.object_id = None
             ad.link_method = None
             ad.link_confidence = None
+            if unlinking:
+                ad.territory_id = restore_territory_id
+                if not ad.unlinked_territory_saved:
+                    ad.unlinked_territory_id = restore_territory_id
+                    ad.unlinked_territory_saved = True
         else:
-            obj = get_object_in_scope(session, scope, new_object_id)
-            ad.object_id = obj.id
-            ad.territory_id = obj.territory_id
+            assert new_object is not None
+            if not ad.unlinked_territory_saved:
+                ad.unlinked_territory_id = ad.territory_id
+                ad.unlinked_territory_saved = True
+            ad.object_id = new_object.id
+            ad.territory_id = new_object.territory_id
             ad.link_method = LinkMethod.manual
             ad.link_confidence = 1.0
             if "status" not in changes and ad.status is AdStatus.verification:

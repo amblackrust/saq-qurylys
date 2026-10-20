@@ -672,6 +672,8 @@ def test_capture_registers_a_pending_publication_and_queues_the_pipeline(
     assert body["platform"] == "instagram" and body["capture_status"] == "pending" and body["is_demo"] is False
     assert body["object_id"] == obj.id and body["link_method"] == "manual" and body["link_confidence"] == 1.0
     assert body["territory_id"] == world.ust.id and body["author"] == "alatau_zhk"
+    assert body["unlinked_territory_id"] == world.ust.id
+    assert body["unlinked_territory_saved"] is True
     assert body["status"] == "captured" and body["phrase_hits"] == [] and body["evidence"] == []
     ad = db.get(AdPost, body["id"])
     assert ad is not None and ad.external_id == "AbC123" and ad.source_account_id == account.id
@@ -855,6 +857,8 @@ def test_manual_ad_minimal_and_validation(client: TestClient, db: Session, world
     minimal = client.post(f"{ADS}/manual", headers=headers, data={"text": "Продажа квартир", "platform": "other"})
     assert minimal.status_code == 201
     assert minimal.json()["territory_id"] == world.ust.id and minimal.json()["object_id"] is None
+    assert minimal.json()["unlinked_territory_id"] == world.ust.id
+    assert minimal.json()["unlinked_territory_saved"] is True
     assert minimal.json()["is_outdoor"] is False and minimal.json()["evidence"] == []
     assert minimal.json()["ocr_status"] is None  # no photos to read
     assert minimal.json()["analysis_status"] is None  # async processing is disabled in the test environment
@@ -921,6 +925,9 @@ def test_relinking_by_hand_is_manual_confirms_the_link_and_recalculates_both_obj
     sent_tasks.clear()
     unlinked = client.patch(f"{ADS}/{ad.id}", headers=auth(user), json={"object_id": None})
     assert unlinked.status_code == 200
+    assert unlinked.json()["territory_id"] == world.ust.id
+    assert unlinked.json()["unlinked_territory_id"] == world.ust.id
+    assert unlinked.json()["unlinked_territory_saved"] is True
     assert (unlinked.json()["object_id"], unlinked.json()["link_method"], unlinked.json()["link_confidence"]) == (
         None,
         None,
@@ -948,7 +955,115 @@ def test_relinking_moves_the_post_to_the_territory_of_the_new_object(
     obj = make_object(db, world.semey)
     response = client.patch(f"{ADS}/{ad.id}", headers=auth(world.users["mio_region"]), json={"object_id": obj.id})
     assert response.json()["territory_id"] == world.semey.id
+    assert response.json()["unlinked_territory_id"] == world.region.id
     assert client.get(f"{ADS}/{ad.id}", headers=auth(world.users["mio_semey"])).status_code == 200
+
+
+def test_manual_relinks_restore_original_territory_after_a_to_b_to_c(
+    client: TestClient, db: Session, world: World
+) -> None:
+    object_a = make_object(db, world.ust, "ЖК А")
+    object_b = make_object(db, world.semey, "ЖК Б")
+    object_c = make_object(db, world.semey, "ЖК В")
+    ad = add_ad(db, world.ust, "Публикация")
+    headers = auth(world.users["mio_region"])
+
+    linked_a = client.patch(f"{ADS}/{ad.id}", headers=headers, json={"object_id": object_a.id})
+    assert linked_a.status_code == 200
+    assert linked_a.json()["unlinked_territory_id"] == world.ust.id
+
+    illegal_territory = client.patch(
+        f"{ADS}/{ad.id}",
+        headers=headers,
+        json={"object_id": object_b.id, "territory_id": world.semey.id},
+    )
+    assert illegal_territory.status_code == 422
+
+    linked_b = client.patch(f"{ADS}/{ad.id}", headers=headers, json={"object_id": object_b.id})
+    linked_c = client.patch(f"{ADS}/{ad.id}", headers=headers, json={"object_id": object_c.id})
+    assert linked_b.status_code == linked_c.status_code == 200
+    assert linked_c.json()["territory_id"] == world.semey.id
+    assert linked_c.json()["unlinked_territory_id"] == world.ust.id
+    mismatched_restore = client.patch(
+        f"{ADS}/{ad.id}",
+        headers=headers,
+        json={"object_id": None, "territory_id": world.semey.id},
+    )
+    assert mismatched_restore.status_code == 422
+    assert mismatched_restore.json()["detail"]["code"] == "unlink_territory_mismatch"
+
+    unlinked = client.patch(f"{ADS}/{ad.id}", headers=headers, json={"object_id": None})
+    assert unlinked.status_code == 200, unlinked.text
+    assert unlinked.json()["object_id"] is None
+    assert unlinked.json()["territory_id"] == world.ust.id
+    assert unlinked.json()["unlinked_territory_id"] == world.ust.id
+    assert unlinked.json()["unlinked_territory_saved"] is True
+    assert client.get(f"{ADS}/{ad.id}", headers=auth(world.users["mio_ust"])).status_code == 200
+    assert client.get(f"{ADS}/{ad.id}", headers=auth(world.users["mio_semey"])).status_code == 404
+
+
+def test_legacy_unlink_requires_an_in_scope_territory_choice(
+    client: TestClient, db: Session, world: World
+) -> None:
+    obj = make_object(db, world.semey, "ЖК Legacy")
+    ad = add_ad(
+        db,
+        world.semey,
+        "Старое объявление",
+        object_id=obj.id,
+        unlinked_territory_id=None,
+        unlinked_territory_saved=False,
+    )
+    city_headers = auth(world.users["mio_semey"])
+
+    missing = client.patch(f"{ADS}/{ad.id}", headers=city_headers, json={"object_id": None})
+    assert missing.status_code == 422
+    assert missing.json()["detail"]["code"] == "unlink_territory_required"
+    out_of_scope = client.patch(
+        f"{ADS}/{ad.id}", headers=city_headers, json={"object_id": None, "territory_id": world.ust.id}
+    )
+    assert out_of_scope.status_code == 404
+    assert out_of_scope.json()["detail"]["code"] == "territory_not_found"
+    db.refresh(ad)
+    assert ad.object_id == obj.id and ad.unlinked_territory_id is None
+
+    explicit = client.patch(
+        f"{ADS}/{ad.id}",
+        headers=auth(world.users["mio_region"]),
+        json={"object_id": None, "territory_id": world.ust.id},
+    )
+    assert explicit.status_code == 200, explicit.text
+    assert explicit.json()["object_id"] is None
+    assert explicit.json()["territory_id"] == world.ust.id
+    assert explicit.json()["unlinked_territory_id"] == world.ust.id
+    assert explicit.json()["unlinked_territory_saved"] is True
+
+
+def test_known_null_territory_is_restored_only_for_unrestricted_scope(
+    client: TestClient, db: Session, world: World
+) -> None:
+    obj = make_object(db, world.semey, "ЖК без исходного города")
+    ad = add_ad(db, None, "Публикация без города", unlinked_territory_saved=True)
+    admin_headers = auth(world.users["admin"])
+
+    linked = client.patch(f"{ADS}/{ad.id}", headers=admin_headers, json={"object_id": obj.id})
+    assert linked.status_code == 200, linked.text
+    assert linked.json()["territory_id"] == world.semey.id
+    assert linked.json()["unlinked_territory_id"] is None
+    assert linked.json()["unlinked_territory_saved"] is True
+
+    denied = client.patch(f"{ADS}/{ad.id}", headers=auth(world.users["mio_semey"]), json={"object_id": None})
+    assert denied.status_code == 404
+    assert denied.json()["detail"]["code"] == "territory_not_found"
+    db.refresh(ad)
+    assert ad.object_id == obj.id and ad.territory_id == world.semey.id
+
+    unlinked = client.patch(f"{ADS}/{ad.id}", headers=admin_headers, json={"object_id": None})
+    assert unlinked.status_code == 200, unlinked.text
+    assert unlinked.json()["object_id"] is None
+    assert unlinked.json()["territory_id"] is None
+    assert unlinked.json()["unlinked_territory_id"] is None
+    assert unlinked.json()["unlinked_territory_saved"] is True
 
 
 def test_confirmed_fields_feed_the_claimed_readiness_of_the_object(

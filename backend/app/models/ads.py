@@ -56,6 +56,9 @@ class AdPost(IdMixin, TimestampMixin, Base):
     )
 
     territory_id: Mapped[int | None] = fk("territory.id", nullable=True, index=True)
+    # The territory to restore when unlinking; the flag distinguishes an unknown legacy value from known NULL.
+    unlinked_territory_id: Mapped[int | None] = fk("territory.id", nullable=True)
+    unlinked_territory_saved: Mapped[bool] = mapped_column(server_default="false")
     source_account_id: Mapped[int | None] = fk("source_account.id", nullable=True)
     platform: Mapped[Platform] = mapped_column(enum_type(Platform, "platform"))
     url: Mapped[str | None] = mapped_column(String(2000))

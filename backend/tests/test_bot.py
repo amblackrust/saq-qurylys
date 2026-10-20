@@ -154,6 +154,7 @@ def test_report_with_text_link_and_photos(
     assert result.photos_saved == 2
     assert ad.origin is AdOrigin.citizen
     assert ad.territory_id == world.ust.id
+    assert ad.unlinked_territory_id == world.ust.id
     assert ad.author is None
     assert ad.source_account_id is None
     assert ad.external_id is not None and ad.external_id.startswith("citizen-")

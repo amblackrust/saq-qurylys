@@ -548,6 +548,8 @@ def _add_demo_object(session: Session, item: DemoObject) -> int:
         session.add(
             AdPost(
                 territory_id=territory.id,
+                unlinked_territory_id=territory.id,
+                unlinked_territory_saved=True,
                 platform=ad.platform,
                 url=ad.url,
                 external_id=ad.external_id,

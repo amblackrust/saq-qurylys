@@ -268,6 +268,8 @@ def create_manual_ad(
         is_outdoor=is_outdoor,
         location=make_point(lat, lon),
         ocr_status=ocr_status,
+        unlinked_territory_id=fields.get("territory_id"),
+        unlinked_territory_saved=True,
         analysis_status=analysis_status_for_dispatch(),
         origin=origin,
         **fields,
@@ -437,6 +439,8 @@ def ingest_collected_post(
         )
     ad = AdPost(
         territory_id=territory_id,
+        unlinked_territory_id=territory_id,
+        unlinked_territory_saved=True,
         source_account_id=account.id,
         platform=account.platform,
         url=post.url,

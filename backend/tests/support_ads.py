@@ -19,6 +19,8 @@ def add_ad(
         "platform": Platform.instagram,
         "external_id": f"test-ad-{number}",
         "territory_id": territory.id if territory else None,
+        "unlinked_territory_id": territory.id if territory else None,
+        "unlinked_territory_saved": True,
         "text": text,
     }
     ad = AdPost(**{**values, **fields})

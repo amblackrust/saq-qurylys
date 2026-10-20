@@ -67,6 +67,8 @@ def _add_facts(session: Session, obj: ConstructionObject, item: HistoryObject, c
         session.add(
             AdPost(
                 territory_id=obj.territory_id,
+                unlinked_territory_id=obj.territory_id,
+                unlinked_territory_saved=True,
                 platform=ad.platform,
                 url=ad.url,
                 external_id=ad.external_id,

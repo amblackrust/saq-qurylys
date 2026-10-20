@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
 import { useDistricts, useTerritories } from '@/api/hooks/reference';
-import type { Territory } from '@/api/types';
 import { flattenTerritories } from './geo';
 
 /** Flat list of every territory the user can see. */
@@ -17,10 +16,17 @@ export function useTerritoryList() {
 }
 
 /** Cities (level `city`) visible to the user: objects belong to a city. */
-export function useCities(): { cities: Territory[]; isPending: boolean } {
-  const { territories, isPending } = useTerritoryList();
+export function useCities() {
+  const query = useTerritoryList();
+  const { territories } = query;
   const cities = useMemo(() => territories.filter((t) => t.level === 'city'), [territories]);
-  return { cities, isPending };
+  return {
+    cities,
+    isPending: query.isPending,
+    isError: query.isError,
+    isFetching: query.isFetching,
+    refetch: query.refetch,
+  };
 }
 
 export interface DistrictOption {

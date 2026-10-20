@@ -202,6 +202,8 @@ def submit_citizen_report(
         raise EmptyReportError
     ad = AdPost(
         territory_id=territory_id,
+        unlinked_territory_id=territory_id,
+        unlinked_territory_saved=True,
         platform=detect_platform(url) if url else Platform.other,
         url=url,
         external_id=f"citizen-{uuid4().hex}",

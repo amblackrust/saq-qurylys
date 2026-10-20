@@ -144,6 +144,7 @@ def test_photos_are_stored_as_evidence_after_the_checks(db: Session, world: Worl
     ad = service.ingest_collected_post(db, account, collected(url="https://t.me/alatau_demo/1"), capture=True)
     assert ad is not None
     service.store_collected_photos(db, ad, urls, media.client())
+    assert ad.unlinked_territory_id == ad.territory_id
 
     stored = list(db.scalars(select(Evidence).where(Evidence.ad_post_id == ad.id).order_by(Evidence.id)))
     assert [(item.kind, item.content_type, item.source_url) for item in stored] == [

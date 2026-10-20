@@ -40,6 +40,8 @@ class DuplicateInstance(BaseModel):
 class AdRow(ORMModel):
     id: int
     territory_id: int | None
+    unlinked_territory_id: int | None
+    unlinked_territory_saved: bool
     source_account_id: int | None
     platform: Platform
     url: str | None
@@ -163,6 +165,7 @@ class AdPatch(BaseModel):
     """Partial update; send only the fields to change. `object_id: null` removes the link."""
 
     object_id: int | None = None
+    territory_id: int | None = None
     status: AdStatus | None = None
     payment_schemes: list[PaymentScheme] | None = None
     claimed_readiness_pct: Annotated[int, Field(ge=0, le=100)] | None = None

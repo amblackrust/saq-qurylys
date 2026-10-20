@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { expect, test } from '../support/test';
 import { t, tKk } from '../support/i18n';
 import type { Page, Route } from '@playwright/test';
-import type { ActivityEvent, AdDetail, AdReviewState, Assignment, Assignee, EvidenceMeta, LinkGraph, ObjectDetail, ObjectDocument, Role, SearchResults, SignalDetail, SignalMaterials, SignalRecipient, SignalStatus, User, VisionAsset, VisionFinding, VisionFrame, VisionSessionDetail } from '../../src/api/types';
+import type { ActivityEvent, AdDetail, AdReviewState, Assignment, Assignee, EvidenceMeta, LinkGraph, ObjectDetail, ObjectDocument, Role, SearchResults, SignalDetail, SignalMaterials, SignalRecipient, SignalStatus, Territory, User, VisionAsset, VisionFinding, VisionFrame, VisionSessionDetail } from '../../src/api/types';
 
 const screenshotDir = '/tmp/ayqyn-polish/after';
 const objectRow = {
@@ -18,6 +18,18 @@ const objectRow = {
   lat: 51.15,
   lon: 71.42,
   is_demo: false,
+};
+
+const cityTerritory: Territory = {
+  id: 9,
+  parent_id: null,
+  level: 'city',
+  code: 'fixture-city',
+  name: 'Город fixture',
+  timezone: 'Asia/Almaty',
+  center_lat: null,
+  center_lon: null,
+  children: [],
 };
 
 const dashboard = {
@@ -295,6 +307,8 @@ const adFixture: AdDetail = {
   duplicate_instances: [],
   duplicate_instances_truncated: false,
   territory_id: 1,
+  unlinked_territory_id: null,
+  unlinked_territory_saved: false,
   source_account_id: null,
   platform: 'instagram',
   url: 'https://example.invalid/post/11',
@@ -523,6 +537,7 @@ interface MockState {
   ad: AdDetail;
   object: ObjectDetail;
   ads: AdDetail[];
+  territories?: Territory[];
   adUploadLimits?: { max_file_bytes: number; max_total_bytes: number; max_photos: number };
   adUploadLimitsFailures?: number;
   manualAd?: AdDetail;
@@ -676,7 +691,7 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
         max_duration_seconds: 600,
       });
     }
-    if (method === 'GET' && path === '/territories') return json(route, []);
+    if (method === 'GET' && path === '/territories') return json(route, state.territories ?? []);
     if (method === 'GET' && path === '/dashboard') return json(route, dashboard);
     if (method === 'GET' && path === '/dashboard/report.pdf') {
       harness.downloadRequests.push({ url, authorization: request.headers()['authorization'] ?? null });
@@ -2334,6 +2349,89 @@ test('ad review makes AI scope visible, confirms the match and reports object-li
   const linkMutation = harness.mutations.find((item) => item.method === 'PATCH' && item.path === '/ads/11' && (item.body as { object_id?: number }).object_id === 8);
   expect(linkMutation?.body).toEqual({ object_id: 8 });
   await screenshot(page, 'ads-llm-object-confirmed');
+  expectCleanBrowser(harness);
+});
+
+test('legacy ad unlink requires an explicit city and sends it to the API', async ({ page }) => {
+  const ad = makeReviewAd(81, {
+    status: 'captured',
+    object_id: 7,
+    object_name: objectRow.name,
+    linked_object: { id: 7, code: objectRow.code, name: objectRow.name },
+    unlinked_territory_id: null,
+    unlinked_territory_saved: false,
+    phrase_hits: [],
+  });
+  const harness = await installMocks(page, 'mio_officer', { ads: [ad], territories: [cityTerritory] });
+
+  await page.goto('/ads?ad=81');
+  const card = page.getByRole('article', { name: t('ads:card.label', { id: ad.id }) });
+  await card.getByRole('button', { name: t('ads:link.change') }).click();
+  const popover = page.locator('[data-slot="popover-content"]').last();
+  await popover.getByRole('button', { name: t('common:ui.clear') }).click();
+
+  const citySelect = popover.getByRole('combobox', { name: t('ads:link.unlinkCity') });
+  await expect(citySelect).toBeVisible();
+  const save = popover.getByRole('button', { name: t('common:save') });
+  await expect(save).toBeDisabled();
+  await citySelect.click();
+  await page.getByRole('option', { name: cityTerritory.name, exact: true }).click();
+  await expect(save).toBeEnabled();
+  await save.click();
+
+  const unlinkMutation = harness.mutations.find(({ method, path }) => method === 'PATCH' && path === '/ads/81');
+  expect(unlinkMutation?.body).toEqual({ object_id: null, territory_id: cityTerritory.id });
+  expectCleanBrowser(harness);
+});
+
+test('known baseline ad unlink restores its city without asking for another choice', async ({ page }) => {
+  const ad = makeReviewAd(82, {
+    status: 'captured',
+    object_id: 7,
+    object_name: objectRow.name,
+    linked_object: { id: 7, code: objectRow.code, name: objectRow.name },
+    unlinked_territory_id: 1,
+    unlinked_territory_saved: true,
+    phrase_hits: [],
+  });
+  const harness = await installMocks(page, 'mio_officer', { ads: [ad] });
+
+  await page.goto('/ads?ad=82');
+  const card = page.getByRole('article', { name: t('ads:card.label', { id: ad.id }) });
+  await card.getByRole('button', { name: t('ads:link.change') }).click();
+  const popover = page.locator('[data-slot="popover-content"]').last();
+  await popover.getByRole('button', { name: t('common:ui.clear') }).click();
+
+  await expect(popover.getByRole('combobox', { name: t('ads:link.unlinkCity') })).toHaveCount(0);
+  await popover.getByRole('button', { name: t('common:save') }).click();
+  const unlinkMutation = harness.mutations.find(({ method, path }) => method === 'PATCH' && path === '/ads/82');
+  expect(unlinkMutation?.body).toEqual({ object_id: null });
+  expectCleanBrowser(harness);
+});
+
+test('known no-territory baseline unlinks without asking for a city', async ({ page }) => {
+  const ad = makeReviewAd(83, {
+    status: 'captured',
+    territory_id: null,
+    object_id: 7,
+    object_name: objectRow.name,
+    linked_object: { id: 7, code: objectRow.code, name: objectRow.name },
+    unlinked_territory_id: null,
+    unlinked_territory_saved: true,
+    phrase_hits: [],
+  });
+  const harness = await installMocks(page, 'mio_officer', { ads: [ad] });
+
+  await page.goto('/ads?ad=83');
+  const card = page.getByRole('article', { name: t('ads:card.label', { id: ad.id }) });
+  await card.getByRole('button', { name: t('ads:link.change') }).click();
+  const popover = page.locator('[data-slot="popover-content"]').last();
+  await popover.getByRole('button', { name: t('common:ui.clear') }).click();
+
+  await expect(popover.getByRole('combobox', { name: t('ads:link.unlinkCity') })).toHaveCount(0);
+  await popover.getByRole('button', { name: t('common:save') }).click();
+  const unlinkMutation = harness.mutations.find(({ method, path }) => method === 'PATCH' && path === '/ads/83');
+  expect(unlinkMutation?.body).toEqual({ object_id: null });
   expectCleanBrowser(harness);
 });
 

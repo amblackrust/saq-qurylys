@@ -205,14 +205,32 @@ def test_two_equally_good_names_are_ambiguous(db: Session, world: World) -> None
 
 
 def test_linking_is_restricted_to_the_territory_of_the_post(db: Session, world: World) -> None:
-    make_object(db, world.semey, "ЖК Алатау")
+    semey_object = make_object(db, world.semey, "ЖК Алатау")
     ust_ad = add_ad(db, world.ust, "ЖК Алатау, квартиры")
     service.link_ad(db, ust_ad)
     assert ust_ad.object_id is None
 
+    legacy_linked = add_ad(
+        db,
+        world.semey,
+        "ЖК Алатау, квартиры",
+        object_id=semey_object.id,
+        link_method=LinkMethod.name,
+        unlinked_territory_id=None,
+        unlinked_territory_saved=False,
+    )
+    service.link_ad(db, legacy_linked)
+    assert legacy_linked.object_id == semey_object.id
+    assert legacy_linked.unlinked_territory_id is None and legacy_linked.unlinked_territory_saved is False
+
     region_ad = add_ad(db, world.region, "ЖК Алатау, квартиры")
     service.link_ad(db, region_ad)
     assert region_ad.object_id is not None and region_ad.territory_id == world.semey.id
+    assert region_ad.unlinked_territory_id == world.region.id
+
+    region_ad.text = "Публикация без совпадения"
+    service.link_ad(db, region_ad)
+    assert region_ad.object_id is None and region_ad.territory_id == world.region.id
 
 
 def test_manual_link_is_never_overridden(db: Session, world: World) -> None:

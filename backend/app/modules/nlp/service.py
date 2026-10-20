@@ -296,9 +296,14 @@ def link_ad(session: Session, ad: AdPost) -> tuple[int | None, int | None]:
     ad.link_confidence = confidence
     ad.link_method = method
     if object_id is not None:
+        if previous is None and not ad.unlinked_territory_saved:
+            ad.unlinked_territory_id = ad.territory_id
+            ad.unlinked_territory_saved = True
         ad.territory_id = session.scalar(
             select(ConstructionObject.territory_id).where(ConstructionObject.id == object_id)
         )
+    elif previous is not None and ad.unlinked_territory_saved:
+        ad.territory_id = ad.unlinked_territory_id
     if ad.status is not AdStatus.removed_saved:
         confident = object_id is not None and not ambiguous and confidence is not None and confidence >= threshold
         # A post nobody on staff looked at (collected, sent by a citizen) counts only once a person confirms the

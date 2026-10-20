@@ -630,6 +630,10 @@ export interface AdRow {
   duplicate_instances: AdDuplicateInstance[];
   duplicate_instances_truncated: boolean;
   territory_id: number | null;
+  /** Territory to restore when unlinked; null means none or an unknown legacy baseline (see saved flag). */
+  unlinked_territory_id: number | null;
+  /** Whether the unlink baseline is known, including a known no-territory baseline. */
+  unlinked_territory_saved: boolean;
   source_account_id: number | null;
   platform: Platform;
   url: string | null;
@@ -709,6 +713,7 @@ export interface AdTriageInput {
 
 export interface AdPatch {
   object_id?: number | null;
+  territory_id?: number;
   status?: AdStatus;
   payment_schemes?: PaymentScheme[];
   claimed_readiness_pct?: number | null;
