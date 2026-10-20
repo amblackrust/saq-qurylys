@@ -10,6 +10,7 @@ from app.models.enums import (
     AdReviewState,
     AdStatus,
     AdVersionSource,
+    AnalysisStatus,
     CaptureStatus,
     DetectedBy,
     LinkMethod,
@@ -55,6 +56,7 @@ class AdRow(ORMModel):
     payment_schemes: list[PaymentScheme]
     claimed_readiness_pct: int | None
     price_before_completion: bool
+    analysis_status: AnalysisStatus | None
     llm_status: LlmStatus
     status: AdStatus
     review_state: AdReviewState

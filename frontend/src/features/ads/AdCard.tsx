@@ -2,7 +2,7 @@ import { IconAlertTriangle, IconCheck, IconExternalLink, IconMapPin } from '@tab
 import { Link } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import type { ReactNode } from 'react';
-import { useAd } from '@/api/hooks/ads';
+import { useAd, useRetryAdAnalysis } from '@/api/hooks/ads';
 import type { AdQueueReason, AdRow, AdStatus } from '@/api/types';
 import { useAuth } from '@/auth/useAuth';
 import { Chip, type ChipTone } from '@/components/Chip';
@@ -13,6 +13,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { EvidenceThumbs } from '@/components/evidence/EvidenceImage';
 import { useEnum } from '@/i18n/useEnum';
 import { useFormat } from '@/i18n/useFormat';
+import { errorMessage } from '@/api/queryClient';
 import { cn } from '@/lib/utils';
 import { AdVersionsPanel } from './AdVersionsPanel';
 import { HighlightedText } from './HighlightedText';
@@ -41,6 +42,49 @@ interface Props {
   focusHitId?: number | null;
   showReviewTasks?: boolean;
   reviewPanel?: ReactNode;
+}
+
+function AnalysisStatus({ ad, editable }: { ad: AdRow; editable: boolean }) {
+  const { t } = useTranslation('ads');
+  const retry = useRetryAdAnalysis();
+  const retryError = retry.isError && retry.variables === ad.id;
+
+  if (ad.analysis_status === null || ad.analysis_status === 'done') return null;
+
+  return (
+    <div id="ad-analysis" tabIndex={-1} className="flex min-w-0 flex-col gap-2">
+      {ad.analysis_status === 'pending' ? (
+        <p className="m-0 flex items-start gap-1.5 text-sm text-text-2 [&>svg]:mt-0.5 [&>svg]:size-3.5" role="status">
+          <Spinner className="size-3.5" />
+          <span>{t('analysis.statusPending')}</span>
+        </p>
+      ) : (
+        <>
+          <p className="m-0 flex items-start gap-1.5 text-sm text-zone-red-ink [&>svg]:mt-0.5 [&>svg]:size-3.5" role="alert">
+            <IconAlertTriangle aria-hidden />
+            <span>{t('analysis.statusFailed')}</span>
+          </p>
+          {editable && (
+            <Button
+              size="xs"
+              variant="secondary"
+              className="self-start max-sm:min-h-11"
+              loading={retry.isPending}
+              disabled={retry.isPending}
+              onClick={() => retry.mutate(ad.id)}
+            >
+              {t('analysis.retry')}
+            </Button>
+          )}
+          {retryError && (
+            <p className="m-0 text-sm text-zone-red-ink" role="alert">
+              {t('analysis.retryError')} {errorMessage(retry.error)}
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
 }
 
 export function AdCard({ ad, highlighted = false, focusHitId = null, showReviewTasks = false, reviewPanel }: Props) {
@@ -108,7 +152,7 @@ export function AdCard({ ad, highlighted = false, focusHitId = null, showReviewT
           <strong className="text-sm">{t('review.queueReasons')}</strong>
           <ul className="m-0 flex list-none flex-col gap-1 p-0 text-sm">
             {view.queue_reasons.map((reason: AdQueueReason) => {
-              const target = reason.includes('capture') ? '#ad-capture' : reason.includes('ocr') ? '#ad-ocr' : reason.includes('llm') ? '#ad-llm' : reason === 'uncertain_object' ? '#ad-link' : reason === 'unreviewed_phrase_hits' ? '#ad-hits' : '#ad-text';
+              const target = reason.includes('capture') ? '#ad-capture' : reason.includes('ocr') ? '#ad-ocr' : reason.includes('analysis') ? '#ad-analysis' : reason.includes('llm') ? '#ad-llm' : reason === 'uncertain_object' ? '#ad-link' : reason === 'unreviewed_phrase_hits' ? '#ad-hits' : '#ad-text';
               return (
                 <li key={reason}>
                   <a className="text-link hover:underline" href={target} onClick={(event) => {
@@ -224,6 +268,8 @@ export function AdCard({ ad, highlighted = false, focusHitId = null, showReviewT
           <EvidenceThumbs evidence={detail.evidence} size={88} />
         </div>
       )}
+
+      <AnalysisStatus ad={view} editable={canEditRegistry} />
 
       {reviewPanel}
 

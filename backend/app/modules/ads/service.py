@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 from celery import chain
 from fastapi import Request
-from sqlalchemy import func, or_, select, tuple_
+from sqlalchemy import func, or_, select, tuple_, update
 from sqlalchemy.orm import Session
 
 from app import audit, storage
@@ -33,6 +33,7 @@ from app.models.enums import (
     AdReviewState,
     AdStatus,
     AdVersionSource,
+    AnalysisStatus,
     CaptureStatus,
     EvidenceKind,
     NotificationKind,
@@ -85,6 +86,8 @@ def queue_reasons(ad: AdPost, has_unreviewed_hits: bool) -> list[AdQueueReason]:
         reasons.append(AdQueueReason(f"capture_{ad.capture_status.value}"))
     if ad.ocr_status is not None and ad.ocr_status.value in {"pending", "failed"}:
         reasons.append(AdQueueReason(f"ocr_{ad.ocr_status.value}"))
+    if ad.analysis_status in {AnalysisStatus.pending, AnalysisStatus.failed}:
+        reasons.append(AdQueueReason(f"analysis_{ad.analysis_status.value}"))
     if ad.llm_status.value in {"pending", "failed"}:
         reasons.append(AdQueueReason(f"llm_{ad.llm_status.value}"))
     if ad.status is AdStatus.verification:
@@ -94,6 +97,11 @@ def queue_reasons(ad: AdPost, has_unreviewed_hits: bool) -> list[AdQueueReason]:
     if not reasons and ad.review_state is AdReviewState.unreviewed:
         reasons.append(AdQueueReason.manual_review)
     return reasons
+
+
+def analysis_status_for_dispatch() -> AnalysisStatus | None:
+    """Track mandatory processing only when this deployment actually queues asynchronous work."""
+    return AnalysisStatus.pending if get_settings().events_enabled else None
 
 
 def duplicate_metadata(
@@ -260,6 +268,7 @@ def create_manual_ad(
         is_outdoor=is_outdoor,
         location=make_point(lat, lon),
         ocr_status=ocr_status,
+        analysis_status=analysis_status_for_dispatch(),
         origin=origin,
         **fields,
     )
@@ -317,12 +326,23 @@ def dispatch_pipeline(ad_post_id: int, *, capture: bool, requested_by: int | Non
 
 
 def mark_capture_unqueued(session: Session, ad: AdPost) -> None:
-    """The pipeline could not be queued, so nothing will end the pending states of the post: show them as failed."""
-    if ad.capture_status is CaptureStatus.pending:
-        ad.capture_status = CaptureStatus.failed
-        ad.capture_error = "Не удалось поставить фиксацию в очередь"
-    if ad.ocr_status is OcrStatus.pending:
-        ad.ocr_status = OcrStatus.failed
+    """The pipeline could not be queued, so end its pending capture, OCR, and analysis states as failed."""
+    session.execute(
+        update(AdPost)
+        .where(AdPost.id == ad.id, AdPost.capture_status == CaptureStatus.pending)
+        .values(capture_status=CaptureStatus.failed, capture_error="Не удалось поставить фиксацию в очередь")
+    )
+    session.execute(
+        update(AdPost)
+        .where(AdPost.id == ad.id, AdPost.ocr_status == OcrStatus.pending)
+        .values(ocr_status=OcrStatus.failed)
+    )
+    session.execute(
+        update(AdPost)
+        .where(AdPost.id == ad.id, AdPost.analysis_status == AnalysisStatus.pending)
+        .values(analysis_status=AnalysisStatus.failed)
+    )
+    session.refresh(ad)
     session.commit()
 
 
@@ -427,6 +447,7 @@ def ingest_collected_post(
         links=post.links,
         capture_status=CaptureStatus.pending if capture and post.url else None,
         origin=AdOrigin.collector,
+        analysis_status=analysis_status_for_dispatch(),
     )
     session.add(ad)
     session.flush()

@@ -1,15 +1,28 @@
 import logging
 
+from sqlalchemy import case, or_, update
+from sqlalchemy.orm import Session
+
 from app.db import get_sessionmaker
 from app.events import object_changed, objects_changed
 from app.models import AdPost
-from app.models.enums import AdOrigin, LlmStatus, OcrStatus
+from app.models.enums import AdOrigin, AnalysisStatus, CaptureStatus, LlmStatus, OcrStatus
 from app.modules.ads.service import refresh_claimed_readiness
 from app.modules.nlp import service
 from app.modules.nlp.ocr import recognise_ad
 from app.worker.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
+
+
+def _mark_analysis_failed(session: Session, ad_post_id: int) -> None:
+    session.rollback()
+    session.execute(
+        update(AdPost)
+        .where(AdPost.id == ad_post_id, AdPost.analysis_status == AnalysisStatus.pending)
+        .values(analysis_status=AnalysisStatus.failed)
+    )
+    session.commit()
 
 
 @celery_app.task(name="nlp.ocr")
@@ -28,9 +41,19 @@ def ocr(ad_post_id: int) -> None:
         except Exception:
             logger.exception("nlp.ocr: recognition failed for ad_post %s", ad_post_id)
             session.rollback()
-            ad = session.get(AdPost, ad_post_id)
-            if ad is not None:
-                ad.ocr_status = OcrStatus.failed
+            failed = session.execute(
+                update(AdPost)
+                .where(
+                    AdPost.id == ad_post_id,
+                    or_(AdPost.ocr_status.is_(None), AdPost.ocr_status != OcrStatus.done),
+                )
+                .values(
+                    ocr_status=OcrStatus.failed,
+                )
+                .returning(AdPost.id)
+            )
+            if failed.first() is None:
+                logger.info("nlp.ocr: keeping successful result for ad_post %s", ad_post_id)
         session.commit()
 
 
@@ -41,8 +64,13 @@ def analyze(ad_post_id: int) -> None:
         if ad is None:
             logger.warning("nlp.analyze: ad_post %s does not exist", ad_post_id)
             return
-        service.analyze_ad(session, ad)
-        session.commit()
+        try:
+            service.analyze_ad(session, ad)
+            session.commit()
+        except Exception:
+            logger.exception("nlp.analyze: analysis failed for ad_post %s", ad_post_id)
+            _mark_analysis_failed(session, ad_post_id)
+            raise
 
 
 @celery_app.task(name="nlp.link")
@@ -52,12 +80,46 @@ def link(ad_post_id: int) -> None:
         if ad is None:
             logger.warning("nlp.link: ad_post %s does not exist", ad_post_id)
             return
-        previous, current = service.link_ad(session, ad)
-        moved = [object_id for object_id in (previous, current) if object_id is not None] if previous != current else []
-        for object_id in moved:
-            # The claims of the post moved from one object to the other.
-            refresh_claimed_readiness(session, object_id)
-        session.commit()
+        try:
+            previous, current = service.link_ad(session, ad)
+            moved = (
+                [object_id for object_id in (previous, current) if object_id is not None]
+                if previous != current
+                else []
+            )
+            for object_id in moved:
+                # The claims of the post moved from one object to the other.
+                refresh_claimed_readiness(session, object_id)
+            session.execute(
+                update(AdPost)
+                .where(
+                    AdPost.id == ad_post_id,
+                    AdPost.analysis_status == AnalysisStatus.pending,
+                    or_(
+                        AdPost.capture_status.is_(None),
+                        AdPost.capture_status.in_((CaptureStatus.done, CaptureStatus.failed)),
+                    ),
+                    or_(AdPost.ocr_status.is_(None), AdPost.ocr_status.in_((OcrStatus.done, OcrStatus.failed))),
+                )
+                .values(
+                    analysis_status=case(
+                        (
+                            or_(
+                                AdPost.capture_status == CaptureStatus.failed,
+                                AdPost.ocr_status == OcrStatus.failed,
+                            ),
+                            AnalysisStatus.failed,
+                        ),
+                        else_=AnalysisStatus.done,
+                    )
+                )
+            )
+            session.commit()
+            session.refresh(ad)
+        except Exception:
+            logger.exception("nlp.link: analysis failed for ad_post %s", ad_post_id)
+            _mark_analysis_failed(session, ad_post_id)
+            raise
     objects_changed(moved)
 
 

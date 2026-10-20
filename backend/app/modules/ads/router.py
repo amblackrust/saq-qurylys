@@ -20,6 +20,7 @@ from app.models.enums import (
     AdOrigin,
     AdReviewState,
     AdStatus,
+    AnalysisStatus,
     CaptureStatus,
     DetectedBy,
     LinkMethod,
@@ -122,6 +123,7 @@ def list_ads(
             AdPost.status == AdStatus.verification,
             AdPost.capture_status.in_((CaptureStatus.pending, CaptureStatus.failed)),
             AdPost.ocr_status.in_((OcrStatus.pending, OcrStatus.failed)),
+            AdPost.analysis_status.in_((AnalysisStatus.pending, AnalysisStatus.failed)),
             AdPost.llm_status.in_((LlmStatus.pending, LlmStatus.failed)),
             exists(select(PhraseHit.id).where(PhraseHit.ad_post_id == AdPost.id, PhraseHit.confirmed.is_(None))),
         )
@@ -194,6 +196,7 @@ def capture_ad(
         before = audit.snapshot(existing)
         existing.capture_status = CaptureStatus.pending
         existing.capture_error = None
+        existing.analysis_status = service.analysis_status_for_dispatch()
         audit.record(session, user, "ad.recapture", "ad_post", existing.id, before, audit.snapshot(existing), request)
         session.commit()
         if not service.dispatch_pipeline(existing.id, capture=True, requested_by=user.id):
@@ -209,6 +212,7 @@ def capture_ad(
         author=handle_from_url(platform, url),
         source_account_id=source.id if source else None,
         capture_status=CaptureStatus.pending,
+        analysis_status=service.analysis_status_for_dispatch(),
         origin=AdOrigin.capture,
         **fields,
     )
@@ -304,6 +308,37 @@ def get_ad(ad_id: int, session: SessionDep, user: StaffUser, scope: ScopeDep) ->
     return service.build_detail(session, service.get_ad_in_scope(session, scope, ad_id), scope)
 
 
+@router.post("/ads/{ad_id}/retry-analysis", response_model=AdDetail)
+def retry_analysis(
+    ad_id: int, session: SessionDep, user: StaffUser, scope: ScopeDep, request: Request
+) -> AdDetail:
+    ad = service.get_ad_in_scope(session, scope, ad_id, for_update=True)
+    if not get_settings().events_enabled:
+        raise api_error(503, "queue_unavailable", "Очередь обработки отключена")
+    if (
+        ad.analysis_status is AnalysisStatus.pending
+        or ad.capture_status is CaptureStatus.pending
+        or ad.ocr_status is OcrStatus.pending
+        or ad.llm_status is LlmStatus.pending
+    ):
+        raise api_error(409, "analysis_in_progress", "Обработка публикации уже выполняется")
+
+    before = audit.snapshot(ad)
+    ad.analysis_status = AnalysisStatus.pending
+    retry_capture = ad.url is not None and ad.capture_status is CaptureStatus.failed
+    if retry_capture:
+        ad.capture_status = CaptureStatus.pending
+        ad.capture_error = None
+    if ad.ocr_status is OcrStatus.failed:
+        ad.ocr_status = OcrStatus.pending
+    session.flush()
+    audit.record(session, user, "ad.retry_analysis", "ad_post", ad.id, before, audit.snapshot(ad), request)
+    session.commit()
+    if not service.dispatch_pipeline(ad.id, capture=retry_capture, requested_by=user.id):
+        service.mark_capture_unqueued(session, ad)
+    return service.build_detail(session, ad, scope)
+
+
 @router.patch("/ads/{ad_id}/triage", response_model=AdDetail)
 def triage_ad(
     ad_id: int, body: AdTriage, session: SessionDep, user: StaffUser, scope: ScopeDep, request: Request
@@ -321,6 +356,7 @@ def triage_ad(
     pipeline_unresolved = (
         ad.capture_status in {CaptureStatus.pending, CaptureStatus.failed}
         or ad.ocr_status in {OcrStatus.pending, OcrStatus.failed}
+        or ad.analysis_status in {AnalysisStatus.pending, AnalysisStatus.failed}
         or ad.llm_status in {LlmStatus.pending, LlmStatus.failed}
     )
     verification_link = ad.status is AdStatus.verification

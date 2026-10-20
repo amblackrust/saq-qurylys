@@ -312,6 +312,7 @@ const adFixture: AdDetail = {
   claimed_readiness_pct: null,
   price_before_completion: false,
   llm_status: 'done',
+  analysis_status: null,
   status: 'verification',
   max_phrase_weight: 4,
   total_phrase_weight: 7,
@@ -524,6 +525,9 @@ interface MockState {
   ads: AdDetail[];
   adUploadLimits?: { max_file_bytes: number; max_total_bytes: number; max_photos: number };
   adUploadLimitsFailures?: number;
+  manualAd?: AdDetail;
+  analysisRetryFailures?: number;
+  analysisPollsRemaining?: number;
   triageFailure?: { state: AdReviewState; code: string; message: string };
   adListFailure?: { code: string; message: string };
   adListDelayMs?: number;
@@ -881,10 +885,50 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
         max_photos: 20,
       });
     }
-    if (method === 'POST' && path === '/ads/manual') return json(route, structuredClone(adFixture), 201);
+    if (method === 'POST' && path === '/ads/manual') {
+      if (!state.manualAd) return json(route, structuredClone(adFixture), 201);
+      const ad = structuredClone(state.manualAd);
+      state.ad = ad;
+      state.ads = [ad, ...state.ads.filter((item) => item.id !== ad.id)];
+      return json(route, ad, 201);
+    }
+    if (method === 'POST' && /^\/ads\/(\d+)\/retry-analysis$/.test(path)) {
+      const adId = Number(path.split('/')[2]);
+      if ((state.analysisRetryFailures ?? 0) > 0) {
+        state.analysisRetryFailures = (state.analysisRetryFailures ?? 1) - 1;
+        return json(route, { detail: { code: 'temporary_failure', message: 'The retry could not be started.' } }, 503);
+      }
+      const current = state.ads.find((ad) => ad.id === adId) ?? state.ad;
+      const ad: AdDetail = {
+        ...current,
+        analysis_status: 'pending',
+        queue_reasons: [
+          ...current.queue_reasons.filter((reason) => reason !== 'analysis_pending' && reason !== 'analysis_failed'),
+          'analysis_pending',
+        ],
+      };
+      state.ads = state.ads.map((item) => item.id === adId ? ad : item);
+      if (state.ad.id === adId) state.ad = ad;
+      state.analysisPollsRemaining = 1;
+      return json(route, ad);
+    }
     if (method === 'GET' && /^\/ads\/\d+$/.test(path)) {
       const id = Number(path.split('/').at(-1));
-      return json(route, state.ads.find((ad) => ad.id === id) ?? state.ad);
+      let ad = state.ads.find((item) => item.id === id) ?? state.ad;
+      if (ad.id === id && ad.analysis_status === 'pending' && state.analysisPollsRemaining !== undefined) {
+        if (state.analysisPollsRemaining > 0) {
+          state.analysisPollsRemaining -= 1;
+        } else {
+          ad = {
+            ...ad,
+            analysis_status: 'done',
+            queue_reasons: ad.queue_reasons.filter((reason) => reason !== 'analysis_pending' && reason !== 'analysis_failed'),
+          };
+          state.ads = state.ads.map((item) => item.id === id ? ad : item);
+          if (state.ad.id === id) state.ad = ad;
+        }
+      }
+      return json(route, ad);
     }
     if (method === 'GET' && path === '/source-accounts') {
       return json(route, {
@@ -2556,6 +2600,66 @@ test('narrow ad selection is a URL-backed detail step that restores the filtered
   }
 
   expect(harness.mutations).toEqual([]);
+  expectCleanBrowser(harness);
+});
+
+test('manual text-only analysis failure can be retried and blocks review until polling completes', async ({ page }) => {
+  const manualAd = makeReviewAd(88, {
+    url: null,
+    author: null,
+    origin: 'manual',
+    text: 'Ручная публикация без ссылки',
+    object_id: null,
+    object_name: null,
+    linked_object: null,
+    status: 'captured',
+    review_state: 'unreviewed',
+    queue_reasons: ['analysis_failed'],
+    capture_status: null,
+    capture_error: null,
+    ocr_status: null,
+    llm_status: 'disabled',
+    analysis_status: 'failed',
+    phrase_hits: [],
+  });
+  const harness = await installMocks(page, 'mio_officer', {
+    manualAd,
+    analysisRetryFailures: 1,
+    expectedApi503Responses: 1,
+  });
+
+  await page.goto('/ads?queue=true');
+  await page.getByRole('button', { name: t('ads:actions.manual') }).click();
+  const dialog = page.getByRole('dialog', { name: t('ads:manual.title') });
+  await dialog.getByRole('textbox', { name: t('ads:manual.text') }).fill(manualAd.text ?? '');
+  await dialog.getByRole('button', { name: t('ads:manual.submit'), exact: true }).click();
+  await expect(dialog).toBeHidden();
+
+  const card = page.getByRole('article', { name: t('ads:card.label', { id: manualAd.id }) });
+  const reviewed = page.getByRole('button', { name: t('ads:review.markReviewed'), exact: true });
+  await expect(card.getByRole('alert')).toContainText(t('ads:analysis.statusFailed'));
+  await expect(card.getByRole('link', { name: /example\.invalid/ })).toHaveCount(0);
+  await expect(reviewed).toBeDisabled();
+
+  const retry = card.getByRole('button', { name: t('ads:analysis.retry'), exact: true });
+  await retry.click();
+  await expect(card.getByRole('alert').filter({ hasText: t('ads:analysis.retryError') })).toBeVisible();
+  await expect(retry).toBeEnabled();
+
+  await retry.click();
+  await expect(card.getByText(t('ads:analysis.statusPending'))).toBeVisible();
+  await expect(reviewed).toBeDisabled();
+  await expect
+    .poll(() => harness.state.ads.find((ad) => ad.id === manualAd.id)?.analysis_status, { timeout: 10_000 })
+    .toBe('done');
+  await expect(reviewed).toBeEnabled();
+
+  const manualCreate = harness.mutations.find(({ method, path }) => method === 'POST' && path === '/ads/manual');
+  expect(manualCreate?.body).toContain('name="text"');
+  expect(manualCreate?.body).not.toContain('name="url"');
+  expect(harness.mutations.filter(({ method, path }) => method === 'POST' && path === '/ads/88/retry-analysis')).toHaveLength(2);
+  await reviewed.click();
+  await expect.poll(() => harness.state.ads.find((ad) => ad.id === manualAd.id)?.review_state).toBe('reviewed');
   expectCleanBrowser(harness);
 });
 

@@ -1,11 +1,14 @@
 import logging
 
 import httpx
+from sqlalchemy import or_, update
 
 from app import collectors
 from app.config import get_settings
 from app.db import get_sessionmaker
 from app.events import objects_changed
+from app.models import AdPost
+from app.models.enums import AnalysisStatus, CaptureStatus
 from app.modules.ads import recheck, service
 from app.modules.ads.capture import USER_AGENT, capture_ad
 from app.worker.celery_app import celery_app
@@ -22,8 +25,33 @@ collectors.register_enabled(get_settings(), collectors.default_client())
 
 @celery_app.task(name="archive.capture", soft_time_limit=CAPTURE_SOFT_LIMIT_S, time_limit=CAPTURE_HARD_LIMIT_S)
 def capture(ad_post_id: int, requested_by: int | None = None) -> None:
-    with get_sessionmaker()() as session:
-        capture_ad(session, ad_post_id, requested_by)
+    try:
+        with get_sessionmaker()() as session:
+            capture_ad(session, ad_post_id, requested_by)
+    except Exception:
+        logger.exception("archive.capture: task failed for ad_post %s", ad_post_id)
+        try:
+            with get_sessionmaker()() as failure_session:
+                failure_session.execute(
+                    update(AdPost)
+                    .where(
+                        AdPost.id == ad_post_id,
+                        or_(AdPost.capture_status.is_(None), AdPost.capture_status != CaptureStatus.done),
+                    )
+                    .values(
+                        capture_status=CaptureStatus.failed,
+                        capture_error="Не удалось завершить фиксацию",
+                    )
+                )
+                failure_session.execute(
+                    update(AdPost)
+                    .where(AdPost.id == ad_post_id, AdPost.analysis_status == AnalysisStatus.pending)
+                    .values(analysis_status=AnalysisStatus.failed)
+                )
+                failure_session.commit()
+        except Exception:
+            logger.exception("archive.capture: failed to persist failure state for ad_post %s", ad_post_id)
+        raise
 
 
 @celery_app.task(name="ads.recheck_due")

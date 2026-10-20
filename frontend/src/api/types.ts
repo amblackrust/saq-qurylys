@@ -595,6 +595,8 @@ export type AdQueueReason =
   | 'ocr_failed'
   | 'llm_pending'
   | 'llm_failed'
+  | 'analysis_pending'
+  | 'analysis_failed'
   | 'uncertain_object'
   | 'unreviewed_phrase_hits'
   | 'manual_review';
@@ -645,6 +647,7 @@ export interface AdRow {
   claimed_readiness_pct: number | null;
   price_before_completion: boolean;
   llm_status: LlmStatus;
+  analysis_status: 'pending' | 'failed' | 'done' | null;
   status: AdStatus;
   max_phrase_weight: number;
   total_phrase_weight: number;

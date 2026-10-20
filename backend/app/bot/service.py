@@ -210,6 +210,7 @@ def submit_citizen_report(
         # With a link the capture worker sets the time; without one the received message is the capture.
         captured_at=None if url else datetime.now(UTC),
         capture_status=CaptureStatus.pending if url else None,
+        analysis_status=ads_service.analysis_status_for_dispatch(),
         origin=AdOrigin.citizen,
     )
     session.add(ad)

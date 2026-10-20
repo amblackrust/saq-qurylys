@@ -23,8 +23,9 @@ const PENDING_POLL_MS = 3000;
 // The worker collects after the request is queued; the page shows the outcome once it had time to finish.
 const COLLECT_REFRESH_MS = 10_000;
 
-/** Keep polling while capture or OCR is pending; terminal statuses stop polling. */
-const isProcessing = (ad: AdRow) => ad.capture_status === 'pending' || ad.ocr_status === 'pending';
+/** Keep polling while capture, OCR, or required analysis is pending; terminal statuses stop polling. */
+const isProcessing = (ad: AdRow) =>
+  ad.capture_status === 'pending' || ad.ocr_status === 'pending' || ad.analysis_status === 'pending';
 
 export function useAdUploadLimits(enabled = true) {
   return useQuery({
@@ -40,7 +41,7 @@ export function useAds(params: AdListParams) {
     queryKey: qk.adList(params),
     queryFn: () => api<Paged<AdRow>>('/ads', { params: { ...params } }),
     placeholderData: keepPreviousData,
-    // Captures and OCR run in a worker; keep polling while any item on the page is still pending.
+    // Capture, OCR, and the required publication analysis run asynchronously.
     refetchInterval: (query) => (query.state.data?.items.some(isProcessing) ? PENDING_POLL_MS : false),
   });
 }
@@ -118,6 +119,17 @@ export function useTriageAd() {
       return qc.invalidateQueries({ queryKey: qk.ads });
     },
     meta: { success: 'adTriageUpdated' },
+  });
+}
+
+export function useRetryAdAnalysis() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (adId: number) => api<AdDetail>(`/ads/${adId}/retry-analysis`, { method: 'POST' }),
+    onSuccess: (data) => {
+      qc.setQueryData(qk.ad(data.id), data);
+      return qc.invalidateQueries({ queryKey: qk.ads });
+    },
   });
 }
 

@@ -10,7 +10,7 @@ from typing import Any
 
 from playwright.sync_api import BrowserContext, Page, Response, Route, ViewportSize, sync_playwright
 from playwright.sync_api import Error as PlaywrightError
-from sqlalchemy import text
+from sqlalchemy import or_, text, update
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
@@ -332,8 +332,20 @@ def _capture_ad_locked(
         ad = session.get(AdPost, ad_post_id, populate_existing=True)
         if ad is None or ad.capture_status is CaptureStatus.done:
             return
-        ad.capture_status = CaptureStatus.failed
-        ad.capture_error = error
+        failed = session.execute(
+            update(AdPost)
+            .where(
+                AdPost.id == ad_post_id,
+                or_(AdPost.capture_status.is_(None), AdPost.capture_status != CaptureStatus.done),
+            )
+            .values(
+                capture_status=CaptureStatus.failed,
+                capture_error=error,
+            )
+            .returning(AdPost.id)
+        )
+        if failed.first() is None:
+            return
         if requested_by is not None:
             session.add(
                 Notification(

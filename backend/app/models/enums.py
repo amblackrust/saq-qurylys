@@ -132,6 +132,12 @@ class LlmStatus(StrEnum):
     disabled = "disabled"
 
 
+class AnalysisStatus(StrEnum):
+    pending = "pending"
+    done = "done"
+    failed = "failed"
+
+
 class AdStatus(StrEnum):
     captured = "captured"
     verification = "verification"
@@ -150,6 +156,8 @@ class AdQueueReason(StrEnum):
     capture_failed = "capture_failed"
     ocr_pending = "ocr_pending"
     ocr_failed = "ocr_failed"
+    analysis_pending = "analysis_pending"
+    analysis_failed = "analysis_failed"
     llm_pending = "llm_pending"
     llm_failed = "llm_failed"
     uncertain_object = "uncertain_object"

@@ -24,6 +24,7 @@ from app.models import AdPost, AuditLog, Evidence, Notification, SourceAccount
 from app.models.enums import (
     AdOrigin,
     AdStatus,
+    AnalysisStatus,
     CaptureStatus,
     EvidenceKind,
     NotificationKind,
@@ -98,6 +99,44 @@ class SessionFactory:
 
     def __exit__(self, *args: object) -> None:
         return None
+
+
+@pytest.mark.parametrize(
+    ("capture_status", "analysis_status", "expected_capture_status"),
+    [
+        (CaptureStatus.pending, AnalysisStatus.pending, CaptureStatus.failed),
+        (CaptureStatus.done, AnalysisStatus.pending, CaptureStatus.done),
+    ],
+)
+def test_unhandled_archive_capture_failure_marks_mandatory_pipeline_failed(
+    db: Session,
+    world: World,
+    monkeypatch: pytest.MonkeyPatch,
+    capture_status: CaptureStatus,
+    analysis_status: AnalysisStatus,
+    expected_capture_status: CaptureStatus,
+) -> None:
+    ad = add_ad(
+        db,
+        world.ust,
+        "Публикация с ошибкой фиксации",
+        url="https://alatau.test/post",
+        capture_status=capture_status,
+        analysis_status=analysis_status,
+    )
+    monkeypatch.setattr(tasks, "get_sessionmaker", lambda: SessionFactory(db))
+
+    def fail(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("advisory lock unavailable")
+
+    monkeypatch.setattr(tasks, "capture_ad", fail)
+
+    with pytest.raises(RuntimeError, match="advisory lock unavailable"):
+        tasks.capture(ad.id)
+
+    db.refresh(ad)
+    assert ad.capture_status is expected_capture_status
+    assert ad.analysis_status is AnalysisStatus.failed
 
 
 # ---------------------------------------------------------------- pipeline dispatch
@@ -874,6 +913,7 @@ def test_capture_failure_does_not_overwrite_a_done_status_after_reload(engine: E
             ad = success_session.get(AdPost, ad_post_id)
             assert ad is not None
             ad.capture_status = CaptureStatus.done
+            ad.analysis_status = AnalysisStatus.done
             success_session.commit()
         raise capture.CaptureError("late capture failure")
 
@@ -884,12 +924,20 @@ def test_capture_failure_does_not_overwrite_a_done_status_after_reload(engine: E
             ad = session.get(AdPost, ad_post_id)
             assert ad is not None
             assert ad.capture_status is CaptureStatus.done and ad.capture_error is None
+            assert ad.analysis_status is AnalysisStatus.done
     finally:
         _delete_committed_capture_ad(engine, ad_post_id)
 
 
 def test_capture_can_retry_after_a_failed_attempt(db: Session, world: World, monkeypatch: pytest.MonkeyPatch) -> None:
-    ad = add_ad(db, world.ust, None, url="https://alatau.test/retry", capture_status=CaptureStatus.pending)
+    ad = add_ad(
+        db,
+        world.ust,
+        None,
+        url="https://alatau.test/retry",
+        analysis_status=AnalysisStatus.pending,
+        capture_status=CaptureStatus.pending,
+    )
     page = capture.PageCapture(
         png=PNG_BYTES,
         mhtml=b"From: retry-test",
@@ -920,6 +968,7 @@ def test_capture_can_retry_after_a_failed_attempt(db: Session, world: World, mon
 
     capture.capture_ad(db, ad.id, None, page_capture=failed_capture)
     assert ad.capture_status is CaptureStatus.failed and ad.capture_error == "upstream unavailable"
+    assert ad.analysis_status is AnalysisStatus.pending
 
     capture.capture_ad(db, ad.id, None, page_capture=lambda url: page)
 

@@ -97,7 +97,8 @@ function ReviewActions({
   const processing =
     ad.capture_status === 'pending' || ad.capture_status === 'failed' ||
     ad.ocr_status === 'pending' || ad.ocr_status === 'failed' ||
-    ad.llm_status === 'pending' || ad.llm_status === 'failed';
+    ad.llm_status === 'pending' || ad.llm_status === 'failed' ||
+    ad.analysis_status === 'pending' || ad.analysis_status === 'failed';
   const unresolved = processing || ad.status === 'verification' || ad.phrase_hits.some((hit) => hit.confirmed === null);
   const confirmedLink = ad.object_id !== null && ad.status !== 'verification';
   const hasConfirmedFindings = ad.phrase_hits.some((hit) => hit.confirmed === true);

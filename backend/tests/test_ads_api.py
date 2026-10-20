@@ -13,6 +13,7 @@ from app.models import AdPost, AuditLog, Evidence, PhraseHit, SourceAccount
 from app.models.enums import (
     AdReviewState,
     AdStatus,
+    AnalysisStatus,
     CaptureStatus,
     DetectedBy,
     EvidenceKind,
@@ -333,6 +334,8 @@ def test_triage_records_reopen_and_does_not_change_ad_facts_or_emit_object_event
 @pytest.mark.parametrize(
     ("field", "value"),
     [
+        ("analysis_status", AnalysisStatus.pending),
+        ("analysis_status", AnalysisStatus.failed),
         ("capture_status", CaptureStatus.pending),
         ("capture_status", CaptureStatus.failed),
         ("ocr_status", OcrStatus.pending),
@@ -342,7 +345,11 @@ def test_triage_records_reopen_and_does_not_change_ad_facts_or_emit_object_event
     ],
 )
 def test_reviewed_triage_waits_for_pending_or_failed_pipeline(
-    client: TestClient, db: Session, world: World, field: str, value: CaptureStatus | OcrStatus | LlmStatus
+    client: TestClient,
+    db: Session,
+    world: World,
+    field: str,
+    value: AnalysisStatus | CaptureStatus | OcrStatus | LlmStatus,
 ) -> None:
     values: dict[str, object] = {field: value}
     if field == "capture_status":
@@ -356,6 +363,76 @@ def test_reviewed_triage_waits_for_pending_or_failed_pipeline(
     assert response.status_code == 409 and response.json()["detail"]["code"] == "reviewed_unresolved"
     db.refresh(ad)
     assert ad.review_state is AdReviewState.unreviewed
+
+
+def test_a_failed_text_only_pipeline_can_be_retried_once_and_stays_unreviewable_while_pending(
+    client: TestClient, world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(get_settings(), "events_enabled", True)
+    monkeypatch.setattr(service, "dispatch_pipeline", lambda *args, **kwargs: False)
+    headers = auth(world.users["mio_ust"])
+    created = client.post(
+        f"{ADS}/manual", headers=headers, data={"text": "Бронь без договора", "platform": "other"}
+    )
+    assert created.status_code == 201, created.text
+    ad_id = created.json()["id"]
+    assert created.json()["analysis_status"] == "failed"
+
+    retry_args: list[tuple[int, bool, int | None]] = []
+
+    def queued(ad_post_id: int, *, capture: bool, requested_by: int | None) -> bool:
+        retry_args.append((ad_post_id, capture, requested_by))
+        return True
+
+    monkeypatch.setattr(service, "dispatch_pipeline", queued)
+    retried = client.post(f"{ADS}/{ad_id}/retry-analysis", headers=headers)
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["analysis_status"] == "pending"
+    assert "analysis_pending" in retried.json()["queue_reasons"]
+    assert retry_args == [(ad_id, False, world.users["mio_ust"].id)]
+
+    duplicate = client.post(f"{ADS}/{ad_id}/retry-analysis", headers=headers)
+    assert duplicate.status_code == 409 and duplicate.json()["detail"]["code"] == "analysis_in_progress"
+    reviewed = client.patch(f"{ADS}/{ad_id}/triage", headers=headers, json={"state": "reviewed"})
+    assert reviewed.status_code == 409 and reviewed.json()["detail"]["code"] == "reviewed_unresolved"
+
+
+def test_retry_analysis_resets_failed_ocr(
+    client: TestClient, db: Session, world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(get_settings(), "events_enabled", True)
+    monkeypatch.setattr(service, "dispatch_pipeline", lambda *args, **kwargs: True)
+    ad = add_ad(
+        db,
+        world.ust,
+        "Фото публикации",
+        analysis_status=AnalysisStatus.failed,
+        ocr_status=OcrStatus.failed,
+    )
+
+    response = client.post(f"{ADS}/{ad.id}/retry-analysis", headers=auth(world.users["mio_ust"]))
+
+    assert response.status_code == 200, response.text
+    assert response.json()["analysis_status"] == "pending"
+    assert response.json()["ocr_status"] == "pending"
+
+
+def test_retry_analysis_waits_for_handled_capture_failure_chain_to_finish(
+    client: TestClient, db: Session, world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(get_settings(), "events_enabled", True)
+    ad = add_ad(
+        db,
+        world.ust,
+        "Публикация с ошибкой фиксации",
+        analysis_status=AnalysisStatus.pending,
+        capture_status=CaptureStatus.failed,
+        url="https://alatau.test/post",
+    )
+
+    response = client.post(f"{ADS}/{ad.id}/retry-analysis", headers=auth(world.users["mio_ust"]))
+
+    assert response.status_code == 409 and response.json()["detail"]["code"] == "analysis_in_progress"
 
 
 def test_irrelevant_triage_allows_unknown_but_blocks_confirmed_facts_and_links(
@@ -780,6 +857,7 @@ def test_manual_ad_minimal_and_validation(client: TestClient, db: Session, world
     assert minimal.json()["territory_id"] == world.ust.id and minimal.json()["object_id"] is None
     assert minimal.json()["is_outdoor"] is False and minimal.json()["evidence"] == []
     assert minimal.json()["ocr_status"] is None  # no photos to read
+    assert minimal.json()["analysis_status"] is None  # async processing is disabled in the test environment
 
     def post(**changes: Any) -> Any:
         return client.post(f"{ADS}/manual", headers=headers, data={"text": "x", "platform": "other", **changes})

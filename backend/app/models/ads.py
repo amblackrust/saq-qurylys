@@ -11,6 +11,7 @@ from app.models.enums import (
     AdReviewState,
     AdStatus,
     AdVersionSource,
+    AnalysisStatus,
     CaptureStatus,
     DetectedBy,
     LinkMethod,
@@ -75,6 +76,7 @@ class AdPost(IdMixin, TimestampMixin, Base):
     llm_status: Mapped[LlmStatus] = mapped_column(
         enum_type(LlmStatus, "llm_status"), server_default=LlmStatus.none.value
     )
+    analysis_status: Mapped[AnalysisStatus | None] = mapped_column(enum_type(AnalysisStatus, "analysis_status"))
     status: Mapped[AdStatus] = mapped_column(enum_type(AdStatus, "ad_status"), server_default=AdStatus.captured.value)
     review_state: Mapped[AdReviewState] = mapped_column(
         enum_type(AdReviewState, "ad_review_state"), server_default=AdReviewState.unreviewed.value

@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app import storage
 from app.config import get_settings
 from app.models import AdPost, Evidence
-from app.models.enums import EvidenceKind, OcrStatus
+from app.models.enums import AnalysisStatus, EvidenceKind, OcrStatus
 from app.modules.nlp import ocr, tasks
 from app.modules.nlp.text import OCR_MARKER, split_ocr
 from app.storage import EvidenceLink
@@ -234,7 +234,13 @@ def test_tesseract_failure_is_recorded_and_not_raised(
     caplog: pytest.LogCaptureFixture,
     failure: Exception,
 ) -> None:
-    ad = add_ad(db, world.ust, f"Текст{OCR_MARKER}Старое", ocr_status=OcrStatus.pending)
+    ad = add_ad(
+        db,
+        world.ust,
+        f"Текст{OCR_MARKER}Старое",
+        analysis_status=AnalysisStatus.pending,
+        ocr_status=OcrStatus.pending,
+    )
     add_photo(db, ad, image_bytes())
     FakeTesseract(monkeypatch, failure)
 
@@ -242,8 +248,12 @@ def test_tesseract_failure_is_recorded_and_not_raised(
         run_task(db, monkeypatch, ad.id)  # a raised exception would stop analyze, link and the LLM step
 
     assert ad.ocr_status is OcrStatus.failed
+    assert ad.analysis_status is AnalysisStatus.pending
     assert ad.text == f"Текст{OCR_MARKER}Старое"
     assert f"recognition failed for ad_post {ad.id}" in caplog.text
+
+    tasks.link(ad.id)
+    assert ad.analysis_status is AnalysisStatus.failed
 
 
 def test_failure_when_no_photo_can_be_read(

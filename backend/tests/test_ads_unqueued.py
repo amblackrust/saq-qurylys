@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.bot import service as bot
+from app.config import get_settings
 from app.models import AdPost
 from app.models.enums import CaptureStatus, OcrStatus
 from app.modules.ads import service
@@ -21,11 +22,13 @@ PHOTO = ("photos", ("a.png", PNG_BYTES, "image/png"))
 
 @pytest.fixture
 def broker_down(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(get_settings(), "events_enabled", True)
     monkeypatch.setattr(service, "dispatch_pipeline", lambda *args, **kwargs: False)
 
 
 @pytest.fixture
 def broker_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(get_settings(), "events_enabled", True)
     monkeypatch.setattr(service, "dispatch_pipeline", lambda *args, **kwargs: True)
 
 
@@ -45,6 +48,23 @@ def test_a_manual_ad_whose_photos_cannot_be_queued_does_not_wait_for_ocr_forever
     assert response.status_code == 201, response.text
     body = response.json()
     assert body["ocr_status"] == "failed" and body["capture_status"] is None
+
+
+def test_a_text_only_manual_ad_with_an_unqueued_pipeline_is_visible_and_cannot_be_reviewed(
+    client: TestClient, world: World, broker_down: None
+) -> None:
+    headers = auth(world.users["mio_ust"])
+    response = client.post(
+        f"{ADS}/manual", headers=headers, data={"text": "Бронь без договора", "platform": "other"}
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["analysis_status"] == "failed"
+    assert "analysis_failed" in body["queue_reasons"]
+
+    reviewed = client.patch(f"{ADS}/{body['id']}/triage", headers=headers, json={"state": "reviewed"})
+    assert reviewed.status_code == 409 and reviewed.json()["detail"]["code"] == "reviewed_unresolved"
 
 
 def test_a_manual_ad_whose_photos_are_queued_waits_for_ocr(

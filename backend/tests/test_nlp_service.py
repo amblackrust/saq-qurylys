@@ -10,10 +10,13 @@ from app.config import get_settings
 from app.models import AdPost, Developer, LinkedEntity, Phrase, PhraseHit, SourceAccount
 from app.models.enums import (
     AdStatus,
+    AnalysisStatus,
+    CaptureStatus,
     DetectedBy,
     LinkedEntityKind,
     LinkMethod,
     LlmStatus,
+    OcrStatus,
     PhraseCategory,
 )
 from app.modules.nlp import llm, service, tasks
@@ -584,7 +587,12 @@ def test_tasks_run_the_pipeline_steps(db: Session, world: World, monkeypatch: py
     monkeypatch.setattr(tasks, "object_changed", changed.append)
     monkeypatch.setattr(tasks, "objects_changed", lambda ids: changed.extend(ids))
     obj = make_object(db, world.ust, "ЖК Алатау")
-    ad = add_ad(db, world.ust, "ЖК Алатау: бронь квартир, звоните 8 777 123 45 67")
+    ad = add_ad(
+        db,
+        world.ust,
+        "ЖК Алатау: бронь квартир, звоните 8 777 123 45 67",
+        analysis_status=AnalysisStatus.pending,
+    )
 
     tasks.analyze(ad.id)
     tasks.link(ad.id)
@@ -592,8 +600,70 @@ def test_tasks_run_the_pipeline_steps(db: Session, world: World, monkeypatch: py
 
     assert ad.max_phrase_weight == 10 and ad.phones == ["+77771234567"]
     assert ad.object_id == obj.id
+    assert ad.analysis_status is AnalysisStatus.done
     assert ad.llm_status is LlmStatus.disabled
     assert changed == [obj.id, obj.id]  # after linking and at the end of the pipeline
+
+
+@pytest.mark.parametrize(
+    ("stage", "initial_status", "expected_status"),
+    [
+        ("analyze_ad", AnalysisStatus.pending, AnalysisStatus.failed),
+        ("link_ad", AnalysisStatus.pending, AnalysisStatus.failed),
+        ("analyze_ad", AnalysisStatus.done, AnalysisStatus.done),
+        ("link_ad", AnalysisStatus.done, AnalysisStatus.done),
+    ],
+)
+def test_mandatory_pipeline_task_failure_is_recorded(
+    db: Session,
+    world: World,
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+    initial_status: AnalysisStatus,
+    expected_status: AnalysisStatus,
+) -> None:
+    monkeypatch.setattr(tasks, "get_sessionmaker", lambda: SessionFactory(db))
+    monkeypatch.setattr(db, "rollback", lambda: None)
+
+    def fail(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("stage failed")
+
+    monkeypatch.setattr(tasks.service, stage, fail)
+    ad = add_ad(db, world.ust, "Публикация", analysis_status=initial_status)
+    task = tasks.analyze if stage == "analyze_ad" else tasks.link
+
+    with pytest.raises(RuntimeError, match="stage failed"):
+        task(ad.id)
+
+    db.refresh(ad)
+    assert ad.analysis_status is expected_status
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected_status", "extra"),
+    [
+        ("capture_status", CaptureStatus.pending, AnalysisStatus.pending, {"url": "https://alatau.test/post"}),
+        ("ocr_status", OcrStatus.pending, AnalysisStatus.pending, {}),
+        ("capture_status", CaptureStatus.failed, AnalysisStatus.failed, {"url": "https://alatau.test/post"}),
+        ("ocr_status", OcrStatus.failed, AnalysisStatus.failed, {}),
+    ],
+)
+def test_link_finalizes_analysis_only_after_capture_and_ocr_are_terminal(
+    db: Session,
+    world: World,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: CaptureStatus | OcrStatus,
+    expected_status: AnalysisStatus,
+    extra: dict[str, object],
+) -> None:
+    monkeypatch.setattr(tasks, "get_sessionmaker", lambda: SessionFactory(db))
+    monkeypatch.setattr(tasks, "objects_changed", lambda _ids: None)
+    ad = add_ad(db, world.ust, "Публикация", analysis_status=AnalysisStatus.pending, **{field: value}, **extra)
+
+    tasks.link(ad.id)
+
+    assert ad.analysis_status is expected_status
 
 
 def test_tasks_ignore_a_missing_post(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
