@@ -4,10 +4,16 @@ import type { Territory } from '@/api/types';
 import { flattenTerritories } from './geo';
 
 /** Flat list of every territory the user can see. */
-export function useTerritoryList(): { territories: Territory[]; isPending: boolean } {
-  const { data, isPending } = useTerritories();
-  const territories = useMemo(() => (data ? flattenTerritories(data) : []), [data]);
-  return { territories, isPending };
+export function useTerritoryList() {
+  const query = useTerritories();
+  const territories = useMemo(() => (query.data ? flattenTerritories(query.data) : []), [query.data]);
+  return {
+    territories,
+    isPending: query.isPending,
+    isError: query.isError,
+    isFetching: query.isFetching,
+    refetch: query.refetch,
+  };
 }
 
 /** Cities (level `city`) visible to the user: objects belong to a city. */

@@ -78,7 +78,7 @@ async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
-async function installMocks(page: Page): Promise<AssignmentCreate[]> {
+async function installMocks(page: Page, territoryLookupFails = false): Promise<AssignmentCreate[]> {
   const posts: AssignmentCreate[] = [];
   await page.addInitScript(() => {
     localStorage.setItem('saq_token', 'mock-assignment-timezone-session');
@@ -97,6 +97,9 @@ async function installMocks(page: Page): Promise<AssignmentCreate[]> {
     }
     if (method === 'GET' && path === '/settings') return json(route, settings);
     if (method === 'GET' && path === '/territories') {
+      if (territoryLookupFails) {
+        return json(route, { detail: { code: 'server_error', message: 'Territories are unavailable' } }, 500);
+      }
       return json(route, [
         {
           id: 1,
@@ -158,9 +161,9 @@ async function installMocks(page: Page): Promise<AssignmentCreate[]> {
   return posts;
 }
 
-async function openAssignmentForm(page: Page, now: string): Promise<AssignmentCreate[]> {
+async function openAssignmentForm(page: Page, now: string, territoryLookupFails = false): Promise<AssignmentCreate[]> {
   await page.clock.install({ time: new Date(now) });
-  const posts = await installMocks(page);
+  const posts = await installMocks(page, territoryLookupFails);
   await page.goto('/objects/7#assignments');
 
   await page.getByRole('button', { name: t('assignments:section.add') }).click();
@@ -198,3 +201,53 @@ for (const scenario of [
     });
   });
 }
+
+test.describe('when the territory calendar date is unavailable', () => {
+  test('can retry the territory lookup and submit an assignment while it keeps failing', async ({ page }) => {
+    const posts = await openAssignmentForm(page, '2026-10-20T12:00:00.000Z', true);
+    const dialog = page.getByRole('dialog');
+    const dueDate = dialog.getByLabel(t('assignments:form.due'));
+
+    await expect(dialog.getByText(t('assignments:form.territoryDateUnavailable'))).toBeVisible();
+    await expect(dueDate).toBeEnabled();
+
+    const retry = dialog.getByRole('button', { name: t('common:retry') });
+    const retryResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'GET' &&
+        response.url().endsWith('/api/v1/territories') &&
+        response.status() === 500,
+    );
+    await retry.click();
+    await retryResponse;
+
+    await dueDate.fill('21.10.2026');
+    await dialog.getByLabel(t('assignments:form.task')).fill('Проверить сведения по объекту');
+    await dialog.getByRole('button', { name: t('assignments:form.submit') }).click();
+
+    await expect.poll(() => posts.length).toBe(1);
+    expect(posts[0]).toMatchObject({ assignee_id: 5, due_date: '2026-10-21', task: 'Проверить сведения по объекту' });
+    await expect(dialog).toBeHidden();
+  });
+
+  test('shows a server past-date rejection on the field and allows correction and retry', async ({ page }) => {
+    const posts = await openAssignmentForm(page, '2026-10-20T12:00:00.000Z', true);
+    const dialog = page.getByRole('dialog');
+    const dueDate = dialog.getByLabel(t('assignments:form.due'));
+
+    await dueDate.fill('19.10.2026');
+    await dialog.getByRole('button', { name: t('assignments:form.submit') }).click();
+
+    await expect.poll(() => posts.length).toBe(1);
+    await expect(dialog.getByText(t('assignments:form.pastDate'))).toBeVisible();
+    expect(posts[0].due_date).toBe('2026-10-19');
+
+    await dueDate.fill('21.10.2026');
+    await expect(dialog.getByText(t('assignments:form.pastDate'))).toBeHidden();
+    await dialog.getByRole('button', { name: t('assignments:form.submit') }).click();
+
+    await expect.poll(() => posts.length).toBe(2);
+    expect(posts[1].due_date).toBe('2026-10-21');
+    await expect(dialog).toBeHidden();
+  });
+});

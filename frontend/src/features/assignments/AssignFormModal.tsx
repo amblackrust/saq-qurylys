@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAssignees, useCreateAssignment } from '@/api/hooks/assignments';
+import { ApiError } from '@/api/client';
 import { DateInput } from '@/components/form/DateInput';
 import { SelectInput } from '@/components/form/SelectInput';
 import { TextArea } from '@/components/form/TextArea';
+import { Button } from '@/components/ui/button';
 import { FormDialog, FormFooter } from '@/features/objects/forms/fields';
 import { useTerritoryList } from '@/lib/territories';
 
@@ -26,7 +28,13 @@ export function AssignFormModal({ opened, onClose, objectId, territoryId }: Prop
 function AssignForm({ objectId, territoryId, onClose }: Omit<Props, 'opened'>) {
   const { t } = useTranslation('assignments');
   const { t: tc } = useTranslation('common');
-  const { territories, isPending: territoriesPending } = useTerritoryList();
+  const {
+    territories,
+    isPending: territoriesPending,
+    isError: territoriesError,
+    isFetching: territoriesFetching,
+    refetch: refetchTerritories,
+  } = useTerritoryList();
   const assignees = useAssignees(objectId, true);
   const create = useCreateAssignment(objectId);
   const [assigneeId, setAssigneeId] = useState<string | null>(null);
@@ -39,6 +47,7 @@ function AssignForm({ objectId, territoryId, onClose }: Omit<Props, 'opened'>) {
   const options = (assignees.data ?? []).map((user) => ({ value: String(user.id), label: user.full_name }));
   const taskEmpty = task.trim() === '';
   const pastDate = dueDate !== null && territoryToday !== null && dueDate < territoryToday;
+  const serverPastDate = create.error instanceof ApiError && create.error.code === 'due_date_in_past';
 
   const submit = () => {
     setTouched(true);
@@ -46,8 +55,7 @@ function AssignForm({ objectId, territoryId, onClose }: Omit<Props, 'opened'>) {
     if (
       assigneeId === null ||
       dueDate === null ||
-      todayAtSubmission === null ||
-      dueDate < todayAtSubmission ||
+      (todayAtSubmission !== null && dueDate < todayAtSubmission) ||
       taskEmpty
     ) return;
     create.mutate({ assignee_id: Number(assigneeId), due_date: dueDate, task: task.trim() }, { onSuccess: onClose });
@@ -77,21 +85,37 @@ function AssignForm({ objectId, territoryId, onClose }: Omit<Props, 'opened'>) {
         label={t('form.due')}
         required
         value={dueDate}
-        onChange={setDueDate}
+        onChange={(value) => {
+          setDueDate(value);
+          if (serverPastDate) create.reset();
+        }}
         description={territoriesPending && territoryToday === null ? t('form.territoryDateLoading') : undefined}
-        disabled={territoryToday === null}
         minDate={territoryToday ?? undefined}
         placeholder="ДД.ММ.ГГГГ"
         error={
-          !territoriesPending && territoryToday === null
-            ? t('form.territoryDateUnavailable')
-            : touched && dueDate === null
-              ? tc('required')
-              : pastDate
-                ? t('form.pastDate')
-                : undefined
+          touched && dueDate === null
+            ? tc('required')
+            : pastDate || serverPastDate
+              ? t('form.pastDate')
+              : undefined
         }
       />
+      {!territoriesPending && territoryToday === null && (
+        <div className="flex flex-wrap items-center gap-2 text-sm text-text-3" role="status">
+          <span>{t('form.territoryDateUnavailable')}</span>
+          {territoriesError && (
+            <Button
+              type="button"
+              size="xs"
+              variant="secondary"
+              loading={territoriesFetching}
+              onClick={() => void refetchTerritories()}
+            >
+              {tc('retry')}
+            </Button>
+          )}
+        </div>
+      )}
       <TextArea
         label={t('form.task')}
         required
@@ -104,27 +128,31 @@ function AssignForm({ objectId, territoryId, onClose }: Omit<Props, 'opened'>) {
         loading={create.isPending}
         onCancel={onClose}
         submitLabel={t('form.submit')}
-        submitDisabled={territoryToday === null}
       />
     </form>
   );
 }
 
-function todayInTimeZone(timeZone: string): string {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    calendar: 'iso8601',
-    numberingSystem: 'latn',
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date());
+function todayInTimeZone(timeZone: string): string | null {
+  let formatter: Intl.DateTimeFormat;
+  try {
+    formatter = new Intl.DateTimeFormat('en-US', {
+      calendar: 'iso8601',
+      numberingSystem: 'latn',
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+  } catch (error) {
+    if (error instanceof RangeError) return null;
+    throw error;
+  }
+  const parts = formatter.formatToParts(new Date());
   const valueFor = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value;
   const year = valueFor('year');
   const month = valueFor('month');
   const day = valueFor('day');
-  if (year === undefined || month === undefined || day === undefined) {
-    throw new Error('Unable to determine the current date in the object territory time zone');
-  }
+  if (year === undefined || month === undefined || day === undefined) return null;
   return year + '-' + month + '-' + day;
 }
