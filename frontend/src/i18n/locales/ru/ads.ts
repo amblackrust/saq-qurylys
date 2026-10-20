@@ -220,6 +220,7 @@ const ads = {
     photosHint: 'До {{maxPhotos}} фото, не более {{maxFile}} МБ каждое и {{maxTotal}} МБ суммарно на одну публикацию',
     photosPlaceholder: 'Выберите фото',
     photosTooMany: 'Можно добавить не более {{max}} фото',
+    photosUnsupportedType: 'Формат файла «{{name}}» не поддерживается. Выберите JPEG, PNG или WebP.',
     photosFileTooLarge: 'Фото «{{name}}» превышает лимит {{max}} МБ',
     photosTotalTooLarge: 'Суммарный размер фото не должен превышать {{max}} МБ',
     photosLimitsLoading: 'Загружаем ограничения для фотографий…',

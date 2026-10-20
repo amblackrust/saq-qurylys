@@ -223,6 +223,7 @@ const ads: typeof ru = {
     photosHint: 'Бір жарияланымға ең көбі {{maxPhotos}} фото; әрқайсысы {{maxFile}} МБ-тан, жалпы өлшемі {{maxTotal}} МБ-тан аспауы керек',
     photosPlaceholder: 'Фото таңдаңыз',
     photosTooMany: 'Ең көбі {{max}} фото қосуға болады',
+    photosUnsupportedType: '«{{name}}» файлының пішіміне қолдау көрсетілмейді. JPEG, PNG немесе WebP таңдаңыз.',
     photosFileTooLarge: '{{name}} фотосы {{max}} МБ шегінен асады',
     photosTotalTooLarge: 'Фотолардың жалпы өлшемі {{max}} МБ-тан аспауы керек',
     photosLimitsLoading: 'Фотоға арналған шектеулер жүктеліп жатыр…',

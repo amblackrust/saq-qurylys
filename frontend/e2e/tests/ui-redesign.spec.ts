@@ -3990,6 +3990,61 @@ test('manual ad photo selection uses the configured per-file limit', async ({ pa
   await expect(dialog.getByRole('img', { name: 'photo-10mb.png' })).toBeVisible();
 });
 
+test('manual ad photo picker accepts JPEG, PNG and WebP and rejects other image formats', async ({ page }) => {
+  const harness = await installMocks(page, 'mio_officer');
+  await page.goto('/ads');
+  await page.getByRole('button', { name: t('ads:actions.manual') }).click();
+  const dialog = page.getByRole('dialog', { name: t('ads:manual.title') });
+  const input = dialog.locator('input[type="file"]');
+  await expect(input).toHaveAttribute('accept', 'image/png,image/jpeg,image/webp');
+
+  let photoInput = input;
+  const selectPhoto = (name: string, mimeType: string, contents: number[] = [120]) =>
+    photoInput.evaluate((element, selected) => {
+      const file = new File([new Uint8Array(selected.contents)], selected.name, { type: selected.mimeType });
+      const files = new DataTransfer();
+      files.items.add(file);
+      const fileInput = element as HTMLInputElement;
+      fileInput.files = files.files;
+      fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    }, { name, mimeType, contents });
+
+  await selectPhoto('animation.png', 'image/gif');
+  await expect(dialog.getByText(t('ads:manual.photosUnsupportedType', { name: 'animation.png' }))).toBeVisible();
+  await expect(dialog.locator('img')).toHaveCount(0);
+
+  await selectPhoto('building.avif', 'image/avif');
+  await expect(dialog.getByText(t('ads:manual.photosUnsupportedType', { name: 'building.avif' }))).toBeVisible();
+  await expect(dialog.locator('img')).toHaveCount(0);
+
+  await dialog.getByLabel(t('ads:manual.text')).fill('Объявление без неподдерживаемых фото');
+  await dialog.getByRole('button', { name: t('ads:manual.submit') }).click();
+  await expect(dialog).toBeHidden();
+  const manualAds = harness.mutations.filter(({ method, path }) => method === 'POST' && path === '/ads/manual');
+  expect(manualAds).toHaveLength(1);
+  expect(manualAds[0]?.body).not.toContain('name="photos"');
+  expect(manualAds[0]?.body).not.toContain('filename=');
+
+  await page.getByRole('button', { name: t('ads:actions.manual') }).click();
+  const reopenedDialog = page.getByRole('dialog', { name: t('ads:manual.title') });
+  const reopenedInput = reopenedDialog.locator('input[type="file"]');
+  photoInput = reopenedInput;
+  const supportedPhotos = [
+    ['photo.png', 'image/png'],
+    ['photo.jpg', 'image/jpeg'],
+    ['photo.webp', 'image/webp'],
+    ['photo-without-mime.png', ''],
+  ] as const;
+  for (const [name, mimeType] of supportedPhotos) {
+    const contents = name.endsWith('.png') ? Array.from(transparentPng) : undefined;
+    await selectPhoto(name, mimeType, contents);
+  }
+  for (const [name] of supportedPhotos) await expect(reopenedDialog.getByRole('img', { name })).toBeVisible();
+  await expect(reopenedDialog.locator('img')).toHaveCount(supportedPhotos.length);
+  expect(harness.mutations.filter(({ method, path }) => method === 'POST' && path === '/ads/manual')).toHaveLength(1);
+  await expect(reopenedInput).toHaveAttribute('accept', 'image/png,image/jpeg,image/webp');
+});
+
 test('manual ad photo picker stays disabled until upload limits load and offers retry', async ({ page }) => {
   await installMocks(page, 'mio_officer', { adUploadLimitsFailures: 1 });
   await page.goto('/ads');

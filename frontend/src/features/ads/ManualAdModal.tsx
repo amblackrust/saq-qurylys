@@ -27,6 +27,9 @@ interface Photo {
 }
 
 const BYTES_PER_MIB = 1024 * 1024;
+const PHOTO_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const PHOTO_ACCEPT = [...PHOTO_MIME_TYPES].join(',');
+const PHOTO_EXTENSION = /\.(?:jpe?g|png|webp)$/i;
 
 interface Props {
   open: boolean;
@@ -120,6 +123,10 @@ export function ManualAdModal({ open, onClose, onCreated }: Props) {
     let error: string | null = null;
 
     for (const file of files) {
+      if (file.type ? !PHOTO_MIME_TYPES.has(file.type) : !PHOTO_EXTENSION.test(file.name)) {
+        error ??= t('manual.photosUnsupportedType', { name: file.name });
+        continue;
+      }
       if (photos.length + added.length >= limits.max_photos) {
         error ??= t('manual.photosTooMany', { max: limits.max_photos });
         continue;
@@ -287,7 +294,7 @@ export function ManualAdModal({ open, onClose, onCreated }: Props) {
             error={photosError ?? undefined}
             disabled={!limitsReady}
             multiple
-            accept="image/*"
+            accept={PHOTO_ACCEPT}
             value={[]}
             onChange={addPhotos}
           />
