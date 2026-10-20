@@ -150,25 +150,27 @@ export function ManualAdModal({ open, onClose, onCreated }: Props) {
   };
 
   const submit = handleSubmit((values) => {
-    if (!limitsReady || !limits) return;
-    if (photos.length > limits.max_photos) {
-      setPhotosError(t('manual.photosTooMany', { max: limits.max_photos }));
-      return;
-    }
-    let totalBytes = 0;
-    for (const photo of photos) {
-      if (photo.file.size > limits.max_file_bytes) {
-        setPhotosError(t('manual.photosFileTooLarge', {
-          name: photo.file.name,
-          max: limits.max_file_bytes / BYTES_PER_MIB,
-        }));
+    if (photos.length > 0) {
+      if (!limitsReady || !limits) return;
+      if (photos.length > limits.max_photos) {
+        setPhotosError(t('manual.photosTooMany', { max: limits.max_photos }));
         return;
       }
-      totalBytes += photo.file.size;
-    }
-    if (totalBytes > limits.max_total_bytes) {
-      setPhotosError(t('manual.photosTotalTooLarge', { max: limits.max_total_bytes / BYTES_PER_MIB }));
-      return;
+      let totalBytes = 0;
+      for (const photo of photos) {
+        if (photo.file.size > limits.max_file_bytes) {
+          setPhotosError(t('manual.photosFileTooLarge', {
+            name: photo.file.name,
+            max: limits.max_file_bytes / BYTES_PER_MIB,
+          }));
+          return;
+        }
+        totalBytes += photo.file.size;
+      }
+      if (totalBytes > limits.max_total_bytes) {
+        setPhotosError(t('manual.photosTotalTooLarge', { max: limits.max_total_bytes / BYTES_PER_MIB }));
+        return;
+      }
     }
 
     createAd.mutate(
@@ -325,7 +327,7 @@ export function ManualAdModal({ open, onClose, onCreated }: Props) {
             <Button type="button" variant="secondary" onClick={close}>
               {tc('cancel')}
             </Button>
-            <Button type="submit" className="max-sm:min-h-11" disabled={!limitsReady} loading={createAd.isPending}>
+            <Button type="submit" className="max-sm:min-h-11" disabled={photos.length > 0 && !limitsReady} loading={createAd.isPending}>
               {t('manual.submit')}
             </Button>
           </DialogFooter>

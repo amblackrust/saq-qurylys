@@ -632,7 +632,12 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
     const url = new URL(request.url());
     const path = url.pathname.replace(/^\/api\/v1/, '');
     const method = request.method();
-    const body = method === 'GET' || method === 'HEAD' || request.postData() === null ? null : request.postDataJSON();
+    const postData = request.postData();
+    const body = method === 'GET' || method === 'HEAD' || postData === null
+      ? null
+      : request.headers()['content-type']?.includes('application/json')
+        ? request.postDataJSON()
+        : postData;
     if (method !== 'GET') harness.mutations.push({ method, path, body });
 
     if (method === 'GET' && path === '/auth/me') return json(route, makeUser(state.role));
@@ -876,6 +881,7 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
         max_photos: 20,
       });
     }
+    if (method === 'POST' && path === '/ads/manual') return json(route, structuredClone(adFixture), 201);
     if (method === 'GET' && /^\/ads\/\d+$/.test(path)) {
       const id = Number(path.split('/').at(-1));
       return json(route, state.ads.find((ad) => ad.id === id) ?? state.ad);
@@ -3984,7 +3990,7 @@ test('manual ad photo selection uses the configured per-file limit', async ({ pa
   await expect(dialog.getByRole('img', { name: 'photo-10mb.png' })).toBeVisible();
 });
 
-test('manual ad entry blocks submit until upload limits load and offers retry', async ({ page }) => {
+test('manual ad photo picker stays disabled until upload limits load and offers retry', async ({ page }) => {
   await installMocks(page, 'mio_officer', { adUploadLimitsFailures: 1 });
   await page.goto('/ads');
   await page.getByRole('button', { name: t('ads:actions.manual') }).click();
@@ -3993,10 +3999,47 @@ test('manual ad entry blocks submit until upload limits load and offers retry', 
 
   await expect(dialog.getByRole('alert')).toContainText(t('ads:manual.photosLimitsUnavailable'));
   await expect(input).toBeDisabled();
-  await expect(dialog.getByRole('button', { name: t('ads:manual.submit') })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: t('ads:manual.submit') })).toBeEnabled();
   await dialog.getByRole('button', { name: t('common:retry') }).click();
   await expect(input).toBeEnabled();
   await expect(dialog.getByRole('button', { name: t('ads:manual.submit') })).toBeEnabled();
+});
+
+test('manual ad without photos submits when upload limits stay unavailable', async ({ page }) => {
+  const harness = await installMocks(page, 'mio_officer');
+  const limitResponses: number[] = [];
+  page.on('response', (response) => {
+    if (new URL(response.url()).pathname === '/api/v1/ads/upload-limits') limitResponses.push(response.status());
+  });
+  await page.route('**/api/v1/ads/upload-limits', (route) =>
+    json(route, { detail: { code: 'temporary_failure', message: 'Could not load upload limits' } }, 500),
+  );
+  await page.goto('/ads');
+  await page.getByRole('button', { name: t('ads:actions.manual') }).click();
+  const dialog = page.getByRole('dialog', { name: t('ads:manual.title') });
+  const input = dialog.locator('input[type="file"]');
+  await expect(dialog.getByRole('alert')).toContainText(t('ads:manual.photosLimitsUnavailable'));
+  await expect.poll(() => limitResponses.length).toBeGreaterThan(0);
+  expect(limitResponses.every((status) => status === 500)).toBe(true);
+  await expect(input).toBeDisabled();
+  await dialog.getByLabel(t('ads:manual.text')).fill('Текст объявления без фото');
+  await dialog.getByRole('combobox', { name: t('ads:manual.platform') }).click();
+  await page.getByRole('option', { name: 'Instagram' }).click();
+  const submit = dialog.getByRole('button', { name: t('ads:manual.submit') });
+  await expect(submit).toBeEnabled();
+  await submit.click();
+
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText(t('common:toasts.created'))).toBeVisible();
+  const manualAds = harness.mutations.filter(({ method, path }) => method === 'POST' && path === '/ads/manual');
+  expect(manualAds).toHaveLength(1);
+  const [manualAd] = manualAds;
+  expect(manualAd).toBeDefined();
+  expect(manualAd?.body).toContain('name="text"');
+  expect(manualAd?.body).toContain('name="platform"');
+  expect(manualAd?.body).not.toContain('name="photos"');
+  expect(manualAd?.body).not.toContain('filename=');
+  expect(harness.unexpected).toEqual([]);
 });
 
 test('an old pending ad keeps polling until capture and OCR reach terminal states', async ({ page }) => {
