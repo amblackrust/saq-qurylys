@@ -104,7 +104,14 @@ export function AssignmentsSection({ object }: { object: ObjectDetail }) {
           })}
         </ul>
       )}
-      {canEditRegistry && <AssignFormModal opened={adding} onClose={() => setAdding(false)} objectId={object.id} />}
+      {canEditRegistry && (
+        <AssignFormModal
+          opened={adding}
+          onClose={() => setAdding(false)}
+          objectId={object.id}
+          territoryId={object.territory_id}
+        />
+      )}
     </Panel>
   );
 }
