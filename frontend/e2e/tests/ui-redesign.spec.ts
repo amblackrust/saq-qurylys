@@ -1421,6 +1421,17 @@ test('administrator edits a setting and submits only the changed value', async (
 
 test('Vision creates a fixture session and uploads a supported photo through the real UI actions', async ({ page }) => {
   const mutations: Array<{ method: string; path: string; body: string | null }> = [];
+  const objectListRequests: URL[] = [];
+  let rejectNextUpload = false;
+  let staleUploadAuthorization: string | null = null;
+  let releaseStaleUpload!: () => void;
+  let staleUploadArrived!: () => void;
+  const staleUploadResponse = new Promise<void>((resolve) => {
+    releaseStaleUpload = resolve;
+  });
+  const staleUploadRequest = new Promise<void>((resolve) => {
+    staleUploadArrived = resolve;
+  });
   const finding: VisionFinding = {
     id: 81, session_id: 41, frame_id: 71, bbox: { x: 0.2, y: 0.2, w: 0.3, h: 0.3 }, category: 'outdoor_ad', status: 'observed',
     origin: 'model', confidence: 0.78, model_version: 'fixture-model', note: 'Fixture finding', review_state: 'pending', ocr_status: null,
@@ -1468,11 +1479,22 @@ test('Vision creates a fixture session and uploads a supported photo through the
     if (method === 'GET' && path === '/auth/me') return json(route, makeUser('mio_officer'));
     if (method === 'GET' && path === '/assistant/config') return json(route, { enabled: false });
     if (method === 'GET' && path === '/vision/config') return json(route, { enabled: true, detector_mode: 'experimental_pretrained', detector_model: 'fixture-only', ocr_enabled: false, max_photo_mb: 20, max_video_mb: 200, max_duration_seconds: 600 });
+    if (method === 'GET' && path === '/objects') {
+      objectListRequests.push(url);
+      return json(route, { items: [objectRow], total: 1 });
+    }
     if (method === 'GET' && path === '/vision/sessions') return json(route, { items: [session], total: 1 });
     if (method === 'POST' && path === '/vision/sessions') return json(route, session, 201);
     if (method === 'GET' && path === '/vision/sessions/41') return json(route, session);
     if (method === 'GET' && path === '/vision/sessions/41/frames') return json(route, { items: session.assets_count > 0 ? [frame] : [], total: session.assets_count > 0 ? 1 : 0 });
     if (method === 'POST' && path === '/vision/sessions/41/assets') {
+      if (rejectNextUpload) {
+        rejectNextUpload = false;
+        staleUploadAuthorization = request.headers().authorization ?? null;
+        staleUploadArrived();
+        await staleUploadResponse;
+        return json(route, { detail: 'Unauthenticated' }, 401);
+      }
       session = { ...session, assets: [asset], assets_count: 1, frames_count: 1, findings: [finding], findings_count: 1 };
       return json(route, asset, 201);
     }
@@ -1493,9 +1515,14 @@ test('Vision creates a fixture session and uploads a supported photo through the
   await page.getByRole('button', { name: 'Новая инспекция' }).click();
   const dialog = page.getByRole('dialog', { name: 'Новая инспекция' });
   await expect(dialog).toBeVisible();
+  await expect.poll(() => objectListRequests.length).toBeGreaterThan(0);
   await dialog.getByRole('button', { name: 'Создать' }).click();
   await expect(page).toHaveURL(/\/vision\/41$/);
   expect(mutations.filter(({ method, path }) => method === 'POST' && path === '/vision/sessions')).toHaveLength(1);
+  const requestsBeforeSessionObject = objectListRequests.length;
+  await page.getByRole('button', { name: t('vision:header.attach') }).click();
+  await expect.poll(() => objectListRequests.slice(requestsBeforeSessionObject).some((request) => request.searchParams.get('territory_id') === '1')).toBe(true);
+  await page.keyboard.press('Escape');
   await page.getByTestId('vision-file-input').setInputFiles({ name: 'inspection.png', mimeType: 'image/png', buffer: transparentPng });
   await expect(page.getByText('inspection.png 1 KB', { exact: true })).toBeVisible();
   await expect(page.getByText('Загружен')).toBeVisible();
@@ -1503,6 +1530,22 @@ test('Vision creates a fixture session and uploads a supported photo through the
 
   const findingCard = page.getByRole('article', { name: 'Находка №81' });
   await expect(findingCard).toBeVisible();
+  const publishObject = findingCard.getByRole('combobox', { name: t('vision:publish.object'), exact: true });
+  await publishObject.fill('Северный');
+  await expect.poll(() => objectListRequests.some((request) => request.searchParams.get('q') === 'Северный' && request.searchParams.get('territory_id') === '1')).toBe(true);
+
+  rejectNextUpload = true;
+  await page.getByTestId('vision-file-input').setInputFiles({ name: 'stale-upload.png', mimeType: 'image/png', buffer: transparentPng });
+  await staleUploadRequest;
+  await page.evaluate(() => localStorage.setItem('saq_token', 'mock-vision-new-session'));
+  releaseStaleUpload();
+  await expect(page.getByText('Ошибка', { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/vision\/41$/);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('saq_token'))).toBe('mock-vision-new-session');
+  expect(staleUploadAuthorization).toBe('Bearer mock-vision-fixture');
+  await page.evaluate(() => localStorage.setItem('saq_token', 'mock-vision-fixture'));
+  expect(mutations.filter(({ method, path }) => method === 'POST' && path === '/vision/sessions/41/assets')).toHaveLength(2);
+
   await findingCard.getByRole('button', { name: 'Показать на кадре' }).click();
   const viewer = page.getByRole('dialog', { name: /Кадр/ });
   await expect(viewer).toBeVisible();
@@ -3808,5 +3851,87 @@ test('mocked logout sends the bearer token and does not restore it on reload', a
   await expect(page.getByRole('heading', { name: 'Вход в систему' })).toBeVisible();
   await page.goto('/work');
   await expect(page).toHaveURL(/\/login$/);
+  expect(harness.pageErrors).toEqual([]);
+});
+
+test('manual ad photo selection enforces count and aggregate limits while allowing larger individual files', async ({ page }) => {
+  const harness = await installMocks(page, 'mio_officer');
+  await page.goto('/ads');
+  await page.getByRole('button', { name: t('ads:actions.manual') }).click();
+  const dialog = page.getByRole('dialog', { name: t('ads:manual.title') });
+  const input = dialog.locator('input[type="file"]');
+  const selectSizedPhotos = (photos: Array<{ name: string; size: number }>) =>
+    input.evaluate((element, selectedPhotos) => {
+      const fileInput = element as HTMLInputElement;
+      const files = new DataTransfer();
+      for (const photo of selectedPhotos) {
+        const file = new File(['x'], photo.name, { type: 'image/png' });
+        Object.defineProperty(file, 'size', { value: photo.size });
+        files.items.add(file);
+      }
+      fileInput.files = files.files;
+      fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    }, photos);
+  const removePhoto = async (name: string) => {
+    await dialog.getByRole('button', { name: t('ads:manual.removePhoto', { name }) }).click();
+  };
+  const mib = 1024 * 1024;
+
+  await selectSizedPhotos([{ name: 'photo-49mb.png', size: 49 * mib }]);
+  await expect(dialog.getByRole('img', { name: 'photo-49mb.png' })).toBeVisible();
+  await expect(dialog.getByText(t('ads:manual.photosTotalTooLarge', { max: 100 }))).toHaveCount(0);
+  await removePhoto('photo-49mb.png');
+
+  await selectSizedPhotos([{ name: 'photo-60mb.png', size: 60 * mib }]);
+  await expect(dialog.getByRole('img', { name: 'photo-60mb.png' })).toBeVisible();
+  await removePhoto('photo-60mb.png');
+
+  await selectSizedPhotos([{ name: 'photo-100mb.png', size: 100 * mib }]);
+  await expect(dialog.getByRole('img', { name: 'photo-100mb.png' })).toBeVisible();
+  await selectSizedPhotos([{ name: 'photo-over-total.png', size: 1 }]);
+  await expect(dialog.getByText(t('ads:manual.photosTotalTooLarge', { max: 100 }))).toBeVisible();
+  await expect(dialog.getByRole('img', { name: 'photo-over-total.png' })).toHaveCount(0);
+  await removePhoto('photo-100mb.png');
+
+  await selectSizedPhotos(Array.from({ length: 21 }, (_, index) => ({ name: `photo-${index + 1}.png`, size: 1 })));
+  await expect(dialog.getByText(t('ads:manual.photosTooMany', { max: 20 }))).toBeVisible();
+  await expect(dialog.locator('img')).toHaveCount(20);
+  await expect(dialog.getByRole('img', { name: 'photo-21.png' })).toHaveCount(0);
+  expect(harness.mutations.filter(({ method, path }) => method === 'POST' && path === '/ads/manual')).toHaveLength(0);
+});
+
+test('an old pending ad keeps polling until capture and OCR reach terminal states', async ({ page }) => {
+  const pendingAd = {
+    ...structuredClone(adFixture),
+    created_at: '2020-01-01T00:00:00Z',
+    capture_status: 'pending' as const,
+    ocr_status: 'pending' as const,
+  };
+  const harness = await installMocks(page, 'mio_officer', { ads: [pendingAd] });
+  let adsResponses = 0;
+  page.on('response', (response) => {
+    if (new URL(response.url()).pathname === '/api/v1/ads') adsResponses += 1;
+  });
+
+  await page.goto('/ads');
+  await expect.poll(() => adsResponses, { timeout: 7_000 }).toBe(2);
+  harness.state.ads = [{ ...pendingAd, capture_status: 'done', ocr_status: 'done' }];
+  await expect.poll(() => adsResponses, { timeout: 5_000 }).toBe(3);
+  await page.waitForTimeout(3_500);
+  expect(adsResponses).toBe(3);
+});
+
+test('a 401 for the current bearer token ends the authenticated session', async ({ page }) => {
+  const harness = await installMocks(page, 'mio_officer');
+  let authorization: string | null = null;
+  await page.route(new RegExp('/api/v1/ads(?:\\?.*)?$'), async (route) => {
+    authorization = route.request().headers().authorization ?? null;
+    await json(route, { detail: 'Unauthenticated' }, 401);
+  });
+
+  await page.goto('/ads');
+  await expect(page).toHaveURL(/\/login$/);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('saq_token'))).toBeNull();
+  expect(authorization).toBe('Bearer mock-ui-session');
   expect(harness.pageErrors).toEqual([]);
 });
