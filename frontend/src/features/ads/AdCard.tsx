@@ -49,9 +49,11 @@ function AnalysisStatus({ ad, editable }: { ad: AdRow; editable: boolean }) {
   const retry = useRetryAdAnalysis();
   const retryError = retry.isError && retry.variables === ad.id;
   const retryBlockedByProcessing =
-    ad.capture_status === 'pending' || ad.ocr_status === 'pending' || ad.llm_status === 'pending';
+    ad.capture_status === 'pending' || ad.ocr_status === 'pending' || ad.analysis_status === 'pending' || ad.llm_status === 'pending';
 
-  if (ad.analysis_status === null || ad.analysis_status === 'done') return null;
+  const hasAnalysisFailure =
+    ad.analysis_status === 'failed' || ad.capture_status === 'failed' || ad.ocr_status === 'failed';
+  if (ad.analysis_status !== 'pending' && !hasAnalysisFailure) return null;
 
   return (
     <div id="ad-analysis" tabIndex={-1} className="flex min-w-0 flex-col gap-2">

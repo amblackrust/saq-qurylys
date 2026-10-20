@@ -937,11 +937,13 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
         : {
           ...current,
           analysis_status: 'pending',
+          ocr_status: current.ocr_status === 'failed' ? 'pending' : current.ocr_status,
           llm_status: 'pending',
           queue_reasons: [
-            ...current.queue_reasons.filter((reason) => reason !== 'analysis_pending' && reason !== 'analysis_failed' && reason !== 'llm_pending' && reason !== 'llm_failed'),
+            ...current.queue_reasons.filter((reason) => reason !== 'analysis_pending' && reason !== 'analysis_failed' && reason !== 'llm_pending' && reason !== 'llm_failed' && reason !== 'ocr_pending' && reason !== 'ocr_failed'),
             'analysis_pending',
             'llm_pending',
+            ...(current.ocr_status === 'failed' ? ['ocr_pending' as const] : []),
           ],
         };
       state.ads = state.ads.map((item) => item.id === adId ? ad : item);
@@ -964,7 +966,8 @@ async function installMocks(page: Page, role: Role, overrides: Partial<MockState
           ad = {
             ...ad,
             analysis_status: 'done',
-            queue_reasons: ad.queue_reasons.filter((reason) => reason !== 'analysis_pending' && reason !== 'analysis_failed'),
+            ocr_status: ad.ocr_status === 'pending' ? 'done' : ad.ocr_status,
+            queue_reasons: ad.queue_reasons.filter((reason) => reason !== 'analysis_pending' && reason !== 'analysis_failed' && reason !== 'ocr_pending' && reason !== 'ocr_failed'),
           };
           state.ads = state.ads.map((item) => item.id === id ? ad : item);
           if (state.ad.id === id) state.ad = ad;
@@ -2775,7 +2778,7 @@ test('manual text-only analysis failure can be retried and blocks review until f
 
   const card = page.getByRole('article', { name: t('ads:card.label', { id: manualAd.id }) });
   const reviewed = page.getByRole('button', { name: t('ads:review.markReviewed'), exact: true });
-  await expect(card.getByRole('alert')).toContainText(t('ads:analysis.statusFailed'));
+  await expect(card.getByRole('alert').filter({ hasText: t('ads:analysis.statusFailed') })).toBeVisible();
   await expect(card.getByRole('link', { name: /example\.invalid/ })).toHaveCount(0);
   await expect(reviewed).toBeDisabled();
 
@@ -2801,6 +2804,67 @@ test('manual text-only analysis failure can be retried and blocks review until f
   expect(harness.mutations.filter(({ method, path }) => method === 'POST' && path === '/ads/88/retry-analysis')).toHaveLength(2);
   await reviewed.click();
   await expect.poll(() => harness.state.ads.find((ad) => ad.id === manualAd.id)?.review_state).toBe('reviewed');
+  expectCleanBrowser(harness);
+});
+
+test('legacy no-URL ad with failed OCR can be retried from its card', async ({ page }) => {
+  const ad = makeReviewAd(93, {
+    url: null,
+    author: null,
+    origin: 'manual',
+    text: null,
+    object_id: null,
+    object_name: null,
+    linked_object: null,
+    status: 'captured',
+    review_state: 'unreviewed',
+    queue_reasons: ['ocr_failed'],
+    capture_status: null,
+    capture_error: null,
+    ocr_status: 'failed',
+    llm_status: 'done',
+    analysis_status: null,
+    phrase_hits: [],
+  });
+  const harness = await installMocks(page, 'mio_officer', { ad, ads: [ad] });
+
+  await page.goto('/ads?queue=true');
+  const card = page.getByRole('article', { name: t('ads:card.label', { id: ad.id }) });
+  const retry = card.getByRole('button', { name: t('ads:analysis.retry'), exact: true });
+
+  await expect(card.getByRole('link', { name: /example\.invalid/ })).toHaveCount(0);
+  await expect(card.getByRole('alert').filter({ hasText: t('ads:analysis.statusFailed') })).toBeVisible();
+  await expect(retry).toBeEnabled();
+  await retry.click();
+
+  await expect(card.getByText(t('ads:analysis.statusPending'))).toBeVisible();
+  await expect.poll(() => harness.state.ads.find((item) => item.id === ad.id)?.analysis_status, { timeout: 10_000 }).toBe('done');
+  await expect.poll(() => harness.state.ads.find((item) => item.id === ad.id)?.ocr_status, { timeout: 10_000 }).toBe('done');
+  await expect(card.getByRole('alert').filter({ hasText: t('ads:analysis.statusFailed') })).toHaveCount(0);
+  await expect(card.getByRole('status').filter({ hasText: t('ads:analysis.statusPending') })).toHaveCount(0);
+  await expect(retry).toHaveCount(0);
+  expect(harness.mutations.filter(({ method, path }) => method === 'POST' && path === `/ads/${ad.id}/retry-analysis`)).toHaveLength(1);
+  expectCleanBrowser(harness);
+});
+
+test('legacy capture failure can be retried without a mandatory analysis status', async ({ page }) => {
+  const ad = makeReviewAd(94, {
+    status: 'captured',
+    review_state: 'unreviewed',
+    queue_reasons: ['capture_failed'],
+    capture_status: 'failed',
+    capture_error: 'The page could not be loaded',
+    ocr_status: null,
+    llm_status: 'disabled',
+    analysis_status: null,
+    phrase_hits: [],
+  });
+  const harness = await installMocks(page, 'mio_officer', { ad, ads: [ad] });
+
+  await page.goto('/ads?queue=true');
+  const card = page.getByRole('article', { name: t('ads:card.label', { id: ad.id }) });
+  await expect(card.getByRole('alert').filter({ hasText: t('ads:analysis.statusFailed') })).toBeVisible();
+  await expect(card.getByRole('button', { name: t('ads:analysis.retry'), exact: true })).toBeEnabled();
   expectCleanBrowser(harness);
 });
 
