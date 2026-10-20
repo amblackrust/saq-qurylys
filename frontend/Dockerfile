@@ -15,6 +15,8 @@ RUN pnpm build
 
 # ---- serve: nginx (SPA + /api proxy) ---------------------------------------
 FROM nginx:1.27-alpine
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+ENV NGINX_ENVSUBST_FILTER=^NGINX_(UPLOAD|VISION)_BODY_LIMIT$
+COPY nginx.conf /etc/nginx/templates/default.conf.template
+COPY nginx-upload-limits.envsh /docker-entrypoint.d/15-upload-limits.envsh
 COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 80

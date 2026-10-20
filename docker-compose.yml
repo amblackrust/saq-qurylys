@@ -6,6 +6,9 @@ x-backend-env: &backend-env
   DATABASE_URL: postgresql+psycopg://${APP_DB_USER:-saq_app}:${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}@db:5432/${POSTGRES_DB}
   REDIS_URL: redis://redis:6379/0
   S3_ENDPOINT: http://minio:9000
+  MAX_UPLOAD_MB: ${MAX_UPLOAD_MB-25}
+  VISION_MAX_PHOTO_MB: ${VISION_MAX_PHOTO_MB-25}
+  VISION_MAX_VIDEO_MB: ${VISION_MAX_VIDEO_MB-1024}
 
 # Dev ports are bound to localhost only. The API trusts X-Forwarded-For from private networks (the nginx
 # container); in production do not publish port 8000 at all.
@@ -303,6 +306,10 @@ services:
   frontend:
     build:
       context: ./frontend
+    environment:
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB-25}
+      VISION_MAX_PHOTO_MB: ${VISION_MAX_PHOTO_MB-25}
+      VISION_MAX_VIDEO_MB: ${VISION_MAX_VIDEO_MB-1024}
     ports:
       - "127.0.0.1:8080:80"
     depends_on:

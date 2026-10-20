@@ -17,7 +17,7 @@
 | Celery автодискаверит `tasks.py` всех модулей | `vision/tasks.py` подхватится сам; очередь `vision` добавляется в `QUEUES`, основной `worker` её **не** слушает |
 | Роли: операционные действия — `StaffUser` (admin + mio_officer); gask/law — только сигнальные карточки | Vision — только `StaffUser`. Чужая территория → 404 |
 | У фронта нет флагов; карточка ЖК — одна страница из панелей | `GET /vision/config` (404, если модуль выключен) управляет видимостью вкладки; в карточке — новая панель после «Фотофиксаций» |
-| nginx: `client_max_body_size 50m`, `proxy_request_buffering off` | Отдельный `location /api/v1/vision/` с лимитом под `VISION_MAX_VIDEO_MB` и увеличенным таймаутом |
+| nginx: общий лимит тела запроса следует за `MAX_UPLOAD_MB` и допускает фотофиксацию до 100 МиБ; `proxy_request_buffering off` | Отдельный `location /api/v1/vision/` с лимитом не ниже 1100 МиБ, который растёт вместе с `VISION_MAX_PHOTO_MB` или `VISION_MAX_VIDEO_MB`, и увеличенным таймаутом |
 
 ## 2. Подключаемость
 
