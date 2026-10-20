@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Controller, useForm, useWatch } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { DialogFooter } from '@/components/ui/dialog';
 import { FormDialog } from '@/features/objects/forms/fields';
 import { useEnumOptions } from '@/i18n/useEnum';
+import { useTerritories } from '@/api/hooks/reference';
 import { useCities } from '@/lib/territories';
 import { SOURCES, isSource } from './constants';
 
@@ -32,9 +33,9 @@ export function NewSessionDialog({ opened, onClose, defaultObjectId = null }: Pr
   const navigate = useNavigate();
   const create = useCreateVisionSession();
   const { user } = useAuth();
-  const { cities } = useCities();
-  // the server falls back to the user's own territory; without one it needs a city when no object is chosen
-  const needsTerritory = user !== null && user.territory_id === null;
+  const { cities, isPending: citiesPending } = useCities();
+  const territoriesQuery = useTerritories();
+  const assignedCity = cities.find((city) => city.id === user?.territory_id);
 
   const schema = useMemo(
     () =>
@@ -46,13 +47,13 @@ export function NewSessionDialog({ opened, onClose, defaultObjectId = null }: Pr
           captured_at: z.string().nullable(),
           note: z.string().trim(),
         })
-        .refine((values) => !needsTerritory || values.object_id !== null || values.territory_id !== null, {
+        .refine((values) => values.object_id !== null || values.territory_id !== null, {
           path: ['territory_id'],
           message: tc('required'),
         }),
-    [needsTerritory, tc],
+    [tc],
   );
-  const { control, register, handleSubmit } = useForm({
+  const { control, register, handleSubmit, getValues, setValue } = useForm({
     resolver: zodResolver(schema),
     defaultValues: {
       object_id: defaultObjectId,
@@ -64,12 +65,17 @@ export function NewSessionDialog({ opened, onClose, defaultObjectId = null }: Pr
   });
 
   const objectId = useWatch({ control, name: 'object_id' });
+  const territoryId = useWatch({ control, name: 'territory_id' });
+
+  useEffect(() => {
+    if (assignedCity && getValues('territory_id') === null) setValue('territory_id', String(assignedCity.id));
+  }, [assignedCity, getValues, setValue]);
 
   const submit = handleSubmit((values) =>
     create.mutate(
       {
         object_id: values.object_id,
-        territory_id: needsTerritory && values.object_id === null ? Number(values.territory_id) : undefined,
+        territory_id: values.object_id === null ? Number(values.territory_id) : undefined,
         source: values.source,
         captured_at: values.captured_at ? new Date(values.captured_at).toISOString() : null,
         note: values.note || null,
@@ -99,7 +105,7 @@ export function NewSessionDialog({ opened, onClose, defaultObjectId = null }: Pr
             />
           )}
         />
-        {needsTerritory && objectId === null && (
+        {objectId === null && (
           <Controller
             control={control}
             name="territory_id"
@@ -111,6 +117,8 @@ export function NewSessionDialog({ opened, onClose, defaultObjectId = null }: Pr
                 data={cities.map((city) => ({ value: String(city.id), label: city.name }))}
                 searchable
                 required
+                loading={citiesPending}
+                disabled={territoriesQuery.isError || cities.length === 0}
                 nothingFound={tc('states.empty')}
                 value={field.value}
                 onChange={field.onChange}
@@ -118,6 +126,14 @@ export function NewSessionDialog({ opened, onClose, defaultObjectId = null }: Pr
               />
             )}
           />
+        )}
+        {territoriesQuery.isError && objectId === null && (
+          <div className="flex flex-wrap items-center gap-2 text-sm text-zone-red-ink" role="alert">
+            <span>{t('new.cityLoadError')}</span>
+            <Button type="button" size="xs" variant="secondary" onClick={() => void territoriesQuery.refetch()}>
+              {tc('retry')}
+            </Button>
+          </div>
         )}
         <div className="grid items-start gap-3 sm:grid-cols-2">
           <Controller
@@ -151,7 +167,14 @@ export function NewSessionDialog({ opened, onClose, defaultObjectId = null }: Pr
           <Button type="button" variant="secondary" onClick={onClose}>
             {tc('cancel')}
           </Button>
-          <Button type="submit" loading={create.isPending}>
+          <Button
+            type="submit"
+            loading={create.isPending}
+            disabled={
+              objectId === null &&
+              (territoriesQuery.isError || citiesPending || cities.length === 0 || territoryId === null)
+            }
+          >
             {t('new.submit')}
           </Button>
         </DialogFooter>

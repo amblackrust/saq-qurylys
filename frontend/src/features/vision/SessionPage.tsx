@@ -2,17 +2,21 @@ import { useState } from 'react';
 import { IconArrowLeft, IconCheck } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router';
+import { useTerritories } from '@/api/hooks/reference';
 import { useMarkSessionReviewed, useUpdateVisionSession, useVisionConfig, useVisionFrames, useVisionSession } from '@/api/hooks/vision';
 import type { VisionConfig, VisionFinding, VisionSessionDetail } from '@/api/types';
 import { DemoBadge } from '@/components/DemoBadge';
+import { SelectInput } from '@/components/form/SelectInput';
 import { ObjectSelect } from '@/components/ObjectSelect';
 import { PageHeader } from '@/components/PageHeader';
 import { EmptyState, QueryBoundary } from '@/components/QueryState';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { unwrapList } from '@/api/client';
 import { useEnum } from '@/i18n/useEnum';
 import { useFormat } from '@/i18n/useFormat';
 import { confirmAction } from '@/lib/confirm';
+import { flattenTerritories } from '@/lib/geo';
 import { AssetsPanel } from './AssetsPanel';
 import { FindingsPanels } from './FindingsPanels';
 import { FrameViewer } from './FrameViewer';
@@ -79,9 +83,17 @@ function ObjectField({ session }: { session: VisionSessionDetail }) {
 
 function SessionView({ session, config }: { session: VisionSessionDetail; config: VisionConfig }) {
   const { t } = useTranslation('vision');
+  const { t: tc } = useTranslation();
   const e = useEnum();
   const f = useFormat();
   const markReviewed = useMarkSessionReviewed(session.id);
+  const update = useUpdateVisionSession(session.id);
+  const territoriesQuery = useTerritories();
+  const territories = territoriesQuery.data ? flattenTerritories(unwrapList(territoriesQuery.data)) : [];
+  const sessionTerritory = territories.find((territory) => territory.id === session.territory_id);
+  const childCities = territories.filter((territory) => territory.level === 'city' && territory.parent_id === session.territory_id);
+  const hasPublishedAds = session.findings.some((finding) => finding.ad_post_id !== null);
+  const [cityId, setCityId] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [viewer, setViewer] = useState<{ frameId: number; findingId: number | null } | null>(null);
   const frames = useVisionFrames(session.id, page, session.processing);
@@ -174,6 +186,48 @@ function SessionView({ session, config }: { session: VisionSessionDetail; config
         </div>
 
         <aside className="order-1 grid min-w-0 content-start gap-6 lg:sticky lg:top-[calc(var(--header-h)_+_1.5rem)] lg:order-2">
+          {territoriesQuery.isError && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-zone-red-line bg-zone-red-soft px-4 py-3 text-sm text-zone-red-ink" role="alert">
+              <span>{t('territoryRefinement.loadError')}</span>
+              <Button type="button" size="xs" variant="secondary" onClick={() => void territoriesQuery.refetch()}>
+                {tc('retry')}
+              </Button>
+            </div>
+          )}
+          {sessionTerritory?.level === 'region' && (
+            <section className="grid min-w-0 gap-3 rounded-xl border border-border bg-surface p-5" aria-labelledby="vision-city-refinement-title">
+              <h2 id="vision-city-refinement-title" className="m-0 text-lg font-semibold text-text">
+                {t('territoryRefinement.title')}
+              </h2>
+              <p className="m-0 text-sm leading-relaxed text-text-2">{t('territoryRefinement.message')}</p>
+              <SelectInput
+                label={t('territoryRefinement.city')}
+                placeholder={t('territoryRefinement.placeholder')}
+                data={childCities.map((city) => ({ value: String(city.id), label: city.name }))}
+                value={cityId}
+                onChange={setCityId}
+                searchable
+                loading={territoriesQuery.isPending}
+                disabled={territoriesQuery.isError || territoriesQuery.isPending || hasPublishedAds || childCities.length === 0}
+                nothingFound={tc('states.empty')}
+              />
+              {childCities.length === 0 && !territoriesQuery.isPending && !territoriesQuery.isError && !hasPublishedAds && (
+                <p className="m-0 text-sm text-text-3">{t('territoryRefinement.noCities')}</p>
+              )}
+              {hasPublishedAds && <p className="m-0 text-sm text-zone-red-ink">{t('territoryRefinement.hasPublishedAds')}</p>}
+              {update.isError && <p className="m-0 text-sm text-zone-red-ink" role="alert">{t('territoryRefinement.saveError')}</p>}
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  loading={update.isPending}
+                  disabled={territoriesQuery.isError || territoriesQuery.isPending || cityId === null || hasPublishedAds}
+                  onClick={() => update.mutate({ territory_id: Number(cityId) })}
+                >
+                  {t('territoryRefinement.save')}
+                </Button>
+              </div>
+            </section>
+          )}
           <section className="grid min-w-0 gap-4 rounded-xl border border-border bg-surface p-5">
             <h2 className="m-0 text-lg font-semibold text-text">{t('header.title')}</h2>
           <dl className="m-0 grid gap-x-4 gap-y-3 text-base sm:grid-cols-[auto_minmax(0,1fr)] lg:grid-cols-1">

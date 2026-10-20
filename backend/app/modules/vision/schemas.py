@@ -46,9 +46,10 @@ class SessionCreate(BaseModel):
 
 
 class SessionPatch(BaseModel):
-    """Only the fields that are sent change; `object_id: null` detaches the session from its object."""
+    """Only sent fields change; `object_id: null` detaches, and territory can refine a region to a city."""
 
     object_id: int | None = None
+    territory_id: int | None = None
     note: Note | None = None
     source: VisionSource | None = None
     captured_at: datetime | None = None

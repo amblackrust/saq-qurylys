@@ -1517,7 +1517,22 @@ test('Vision creates a fixture session and uploads a supported photo through the
       return json(route, finding);
     }
     if (method === 'POST' && path === '/vision/findings/81/publish-ad') return json(route, { ad_id: 99 }, 201);
-    if (method === 'GET' && ['/notifications', '/territories'].includes(path)) return json(route, path === '/notifications' ? { items: [] } : []);
+    if (method === 'GET' && path === '/territories') {
+      return json(route, [
+        {
+          id: 1,
+          parent_id: null,
+          level: 'city',
+          code: 'FIXTURE-CITY',
+          name: 'Город fixture',
+          timezone: 'Asia/Almaty',
+          center_lat: null,
+          center_lon: null,
+          children: [],
+        },
+      ]);
+    }
+    if (method === 'GET' && path === '/notifications') return json(route, { items: [] });
     if (method === 'GET' && path === '/activity') return json(route, { items: [], cursor: null, reset: false });
     if (method === 'GET' && path === '/settings') return json(route, { review_days: 10, ad_window_days: 90, readiness_gap_pp: 20, significant_delay_days: 90, zone_yellow_min: 25, zone_red_min: 60, complaints_threshold: 3, stalled_days: 180, recheck_after_days: 90, link_confidence_threshold: 0.7, green_interval_days: 90, yellow_interval_days: 30, recipient_emails: { mio: [], gask: [], law_enforcement: [] } });
     return json(route, { detail: `No Vision fixture for ${method} ${path}` }, 404);

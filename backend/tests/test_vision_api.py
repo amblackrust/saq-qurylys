@@ -12,8 +12,18 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import AuditLog, Inspection, VisionAsset, VisionFinding, VisionFrame, VisionJob, VisionReview
-from app.models.enums import VisionAssetStatus, VisionJobStatus
+from app.models import (
+    AuditLog,
+    Inspection,
+    Territory,
+    VisionAsset,
+    VisionFinding,
+    VisionFrame,
+    VisionJob,
+    VisionReview,
+    VisionSession,
+)
+from app.models.enums import TerritoryLevel, VisionAssetStatus, VisionJobStatus, VisionSource
 from app.worker.celery_app import celery_app
 from tests.conftest import World, auth, make_object
 
@@ -48,6 +58,14 @@ def create_session(client: TestClient, user: Any, **body: Any) -> dict[str, Any]
     assert response.status_code == 201, response.text
     session: dict[str, Any] = response.json()
     return session
+
+
+def create_legacy_region_session(db: Session, user: Any, territory_id: int) -> VisionSession:
+    """Seed a pre-city-schema session that can be refined through the public API."""
+    legacy = VisionSession(territory_id=territory_id, source=VisionSource.drone, created_by=user.id)
+    db.add(legacy)
+    db.flush()
+    return legacy
 
 
 def upload(client: TestClient, user: Any, session_id: int, data: bytes, name: str = "shot.jpg") -> Any:
@@ -172,6 +190,17 @@ def test_session_territory_comes_from_the_object_or_the_user(client: TestClient,
     named = create_session(client, world.users["admin"], territory_id=world.ust.id)
     assert named["territory_id"] == world.ust.id
 
+    region_selected = create_session(client, world.users["mio_region"], territory_id=world.semey.id)
+    assert region_selected["territory_id"] == world.semey.id
+
+    region_only = client.post(
+        f"{VISION}/sessions",
+        json={"source": "drone", "territory_id": world.region.id},
+        headers=auth(world.users["admin"]),
+    )
+    assert region_only.status_code == 422
+    assert region_only.json()["detail"]["code"] == "city_required"
+
     audit_actions = set(db.scalars(select(AuditLog.action).where(AuditLog.entity_type == "vision_session")))
     assert audit_actions == {"vision_session.create"}
 
@@ -230,32 +259,100 @@ def test_list_filters_and_counts(client: TestClient, db: Session, world: World) 
 
 def test_patch_links_and_unlinks_the_object_by_hand(client: TestClient, db: Session, world: World) -> None:
     user = world.users["mio_region"]
-    session = create_session(client, user, territory_id=world.region.id)
+    legacy = create_legacy_region_session(db, user, world.region.id)
     obj = make_object(db, world.ust)
+    outside_region = Territory(level=TerritoryLevel.region, code="test-outside-region", name="Другая область")
+    db.add(outside_region)
+    db.flush()
+    outside_city = Territory(
+        parent_id=outside_region.id,
+        level=TerritoryLevel.city,
+        code="test-outside-city",
+        name="Другой город",
+    )
+    db.add(outside_city)
+    db.flush()
+    other_city_object = make_object(db, world.semey)
+
+    needs_city = client.patch(f"{VISION}/sessions/{legacy.id}", json={"object_id": obj.id}, headers=auth(user))
+    assert needs_city.status_code == 422
+    assert needs_city.json()["detail"]["code"] == "city_refinement_required"
+
+    region_target = client.patch(
+        f"{VISION}/sessions/{legacy.id}", json={"territory_id": world.region.id}, headers=auth(user)
+    )
+    assert region_target.status_code == 422
+    assert region_target.json()["detail"]["code"] == "city_required"
+    outside_target = client.patch(
+        f"{VISION}/sessions/{legacy.id}", json={"territory_id": outside_city.id}, headers=auth(user)
+    )
+    assert outside_target.status_code == 404
+    wrong_parent_target = client.patch(
+        f"{VISION}/sessions/{legacy.id}",
+        json={"territory_id": outside_city.id},
+        headers=auth(world.users["admin"]),
+    )
+    assert wrong_parent_target.status_code == 422
+    assert wrong_parent_target.json()["detail"]["code"] == "territory_mismatch"
+    invalid_pair = client.patch(
+        f"{VISION}/sessions/{legacy.id}",
+        json={"territory_id": world.ust.id, "object_id": other_city_object.id},
+        headers=auth(user),
+    )
+    assert invalid_pair.status_code == 422
+    assert invalid_pair.json()["detail"]["code"] == "territory_mismatch"
+    assert legacy.territory_id == world.region.id
+
+    refined = client.patch(f"{VISION}/sessions/{legacy.id}", json={"territory_id": world.ust.id}, headers=auth(user))
+    assert refined.status_code == 200, refined.text
+    assert refined.json()["territory_id"] == world.ust.id
+    audit_row = db.scalars(
+        select(AuditLog).where(
+            AuditLog.entity_type == "vision_session",
+            AuditLog.entity_id == legacy.id,
+            AuditLog.action == "vision_session.update",
+        )
+    ).one()
+    assert audit_row.before["territory_id"] == world.region.id
+    assert audit_row.after["territory_id"] == world.ust.id
 
     linked = client.patch(
-        f"{VISION}/sessions/{session['id']}",
+        f"{VISION}/sessions/{legacy.id}",
         json={"object_id": obj.id, "note": "после дождя", "source": "phone"},
         headers=auth(user),
-    ).json()
+    )
+    assert linked.status_code == 200, linked.text
+    linked = linked.json()
     assert linked["object"]["id"] == obj.id
     assert linked["territory_id"] == world.ust.id
     assert (linked["note"], linked["source"]) == ("после дождя", "phone")
 
-    untouched = client.patch(f"{VISION}/sessions/{session['id']}", json={"note": "ещё"}, headers=auth(user)).json()
+    untouched = client.patch(f"{VISION}/sessions/{legacy.id}", json={"note": "ещё"}, headers=auth(user)).json()
     assert untouched["object"]["id"] == obj.id
 
-    detached = client.patch(f"{VISION}/sessions/{session['id']}", json={"object_id": None}, headers=auth(user)).json()
+    detached = client.patch(f"{VISION}/sessions/{legacy.id}", json={"object_id": None}, headers=auth(user)).json()
     assert detached["object"] is None
-    assert (
-        client.patch(f"{VISION}/sessions/{session['id']}", json={"source": None}, headers=auth(user)).status_code == 422
+    changed_city = client.patch(
+        f"{VISION}/sessions/{legacy.id}", json={"territory_id": world.semey.id}, headers=auth(user)
     )
+    assert changed_city.status_code == 422
+    assert changed_city.json()["detail"]["code"] == "territory_mismatch"
+    changed_object_city = client.patch(
+        f"{VISION}/sessions/{legacy.id}", json={"object_id": other_city_object.id}, headers=auth(user)
+    )
+    assert changed_object_city.status_code == 422
+    assert changed_object_city.json()["detail"]["code"] == "territory_mismatch"
+    assert client.patch(f"{VISION}/sessions/{legacy.id}", json={"source": None}, headers=auth(user)).status_code == 422
     assert (
-        client.patch(f"{VISION}/sessions/{session['id']}", json={"object_id": 999999}, headers=auth(user)).status_code
+        client.patch(f"{VISION}/sessions/{legacy.id}", json={"object_id": 999999}, headers=auth(user)).status_code
         == 404
     )
-    actions = list(db.scalars(select(AuditLog.action).where(AuditLog.action == "vision_session.update")))
-    assert len(actions) == 3
+    actions = list(
+        db.scalars(
+            select(AuditLog.action).where(AuditLog.action == "vision_session.update", AuditLog.entity_id == legacy.id)
+        )
+    )
+    assert len(actions) == 4
 
 
 def test_session_becomes_reviewed_only_by_an_explicit_request(client: TestClient, db: Session, world: World) -> None:

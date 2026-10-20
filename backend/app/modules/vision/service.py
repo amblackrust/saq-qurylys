@@ -34,6 +34,7 @@ from app.models import (
     VisionSession,
 )
 from app.models.enums import (
+    TerritoryLevel,
     VisionAssetKind,
     VisionAssetStatus,
     VisionFindingStatus,
@@ -133,19 +134,28 @@ def get_finding_in_scope(db: Session, scope: TerritoryScope, finding_id: int) ->
 def resolve_territory(
     db: Session, scope: TerritoryScope, user: AppUser, object_id: int | None, territory_id: int | None
 ) -> tuple[int, int | None]:
-    """Territory and object of a new session: the territory of the object, else the one named, else the user's."""
+    """Resolve a session to one city, using the object's city or a selected/inferred user city."""
     if object_id is not None:
         obj = get_object_in_scope(db, scope, object_id)
+        object_territory = db.get(Territory, obj.territory_id)
+        if object_territory is None or object_territory.level is not TerritoryLevel.city:
+            raise api_error(422, "city_required", "Объект должен относиться к городу")
         if territory_id is not None and territory_id != obj.territory_id:
             raise api_error(422, "territory_mismatch", "Территория не совпадает с территорией объекта")
         return obj.territory_id, obj.id
     if territory_id is not None:
-        if not scope.contains(territory_id) or db.get(Territory, territory_id) is None:
+        territory = db.get(Territory, territory_id)
+        if territory is None or not scope.contains(territory_id):
             raise api_error(404, "territory_not_found", "Территория не найдена")
-        return territory_id, None
+        if territory.level is not TerritoryLevel.city:
+            raise api_error(422, "city_required", "Укажите город инспекции")
+        return territory.id, None
     if user.territory_id is None:
         raise api_error(422, "territory_required", "Укажите объект или территорию")
-    return user.territory_id, None
+    user_territory = db.get(Territory, user.territory_id)
+    if user_territory is not None and user_territory.level is TerritoryLevel.city:
+        return user_territory.id, None
+    raise api_error(422, "city_required", "Укажите город инспекции")
 
 
 # ---------------------------------------------------------------- response building

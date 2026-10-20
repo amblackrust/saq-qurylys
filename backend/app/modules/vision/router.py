@@ -5,18 +5,28 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, File, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from minio.error import S3Error
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 
 from app import audit, storage
 from app.config import get_settings
 from app.deps import PageDep, ScopeDep, SessionDep, StaffUser
 from app.errors import api_error
-from app.models import VisionAsset, VisionFinding, VisionFrame, VisionJob, VisionRun, VisionSession
+from app.models import (
+    ConstructionObject,
+    Territory,
+    VisionAsset,
+    VisionFinding,
+    VisionFrame,
+    VisionJob,
+    VisionRun,
+    VisionSession,
+)
 from app.models.enums import (
     AdOrigin,
     LinkMethod,
     OcrStatus,
     Platform,
+    TerritoryLevel,
     VisionAssetKind,
     VisionAssetStatus,
     VisionCategory,
@@ -197,16 +207,69 @@ def get_session(session_id: int, session: SessionDep, user: StaffUser, scope: Sc
 def patch_session(
     session_id: int, body: SessionPatch, session: SessionDep, user: StaffUser, scope: ScopeDep, request: Request
 ) -> SessionDetail:
-    vision_session = service.get_session_in_scope(session, scope, session_id)
+    vision_session = session.scalars(
+        select(VisionSession)
+        .where(VisionSession.id == session_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).one_or_none()
+    if vision_session is None or not scope.contains(vision_session.territory_id):
+        raise api_error(404, "vision_session_not_found", "Сессия съёмки не найдена")
     before = audit.snapshot(vision_session)
     fields = body.model_fields_set
+    territory_id = vision_session.territory_id
+    if "territory_id" in fields:
+        if body.territory_id is None:
+            raise api_error(422, "city_required", "Укажите город инспекции")
+        target = session.get(Territory, body.territory_id)
+        if target is None or not scope.contains(target.id):
+            raise api_error(404, "territory_not_found", "Территория не найдена")
+        if target.level is not TerritoryLevel.city:
+            raise api_error(422, "city_required", "Укажите город инспекции")
+
+        current = session.get(Territory, vision_session.territory_id)
+        if current is None:
+            raise api_error(409, "territory_not_found", "Территория сессии не найдена")
+        if current.level is TerritoryLevel.region:
+            if target.parent_id != current.id:
+                raise api_error(422, "territory_mismatch", "Выберите город внутри области сессии")
+            already_published = session.scalar(
+                select(
+                    exists().where(
+                        VisionFinding.session_id == session_id,
+                        VisionFinding.ad_post_id.is_not(None),
+                    )
+                )
+            )
+            if already_published:
+                raise api_error(
+                    409,
+                    "session_already_published",
+                    "Нельзя уточнить город: по сессии уже создана публикация",
+                )
+        elif target.id != current.id:
+            raise api_error(422, "territory_mismatch", "Город сессии нельзя изменить")
+
+        if vision_session.object_id is not None and "object_id" not in fields:
+            linked_object = session.get(ConstructionObject, vision_session.object_id)
+            if linked_object is None or linked_object.territory_id != target.id:
+                raise api_error(422, "territory_mismatch", "Город не совпадает с городом объекта")
+        territory_id = target.id
+
     if "object_id" in fields:
         if body.object_id is None:
             vision_session.object_id = None
         else:
             obj = get_object_in_scope(session, scope, body.object_id)
+            current = session.get(Territory, territory_id)
+            if current is None:
+                raise api_error(409, "territory_not_found", "Территория сессии не найдена")
+            if current.level is TerritoryLevel.region:
+                raise api_error(422, "city_refinement_required", "Сначала уточните город инспекции")
+            if current.id != obj.territory_id:
+                raise api_error(422, "territory_mismatch", "Город объекта не совпадает с городом сессии")
             vision_session.object_id = obj.id
-            vision_session.territory_id = obj.territory_id
+    vision_session.territory_id = territory_id
     if "note" in fields:
         vision_session.note = body.note or None
     if "source" in fields and body.source is not None:
@@ -588,8 +651,18 @@ def publish_ad(
     if not text:
         raise api_error(422, "validation_error", "Текст публикации не может быть пустым")
 
+    vision_session = session.scalars(
+        select(VisionSession)
+        .where(VisionSession.id == finding.session_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).one_or_none()
+    if vision_session is None or not scope.contains(vision_session.territory_id):
+        raise api_error(404, "vision_session_not_found", "Сессия съёмки не найдена")
+    territory = session.get(Territory, vision_session.territory_id)
+    if territory is None or territory.level is not TerritoryLevel.city:
+        raise api_error(422, "city_required", "Перед публикацией уточните город инспекции")
     frame, asset = service.get_frame_in_scope(session, scope, finding.frame_id)
-    vision_session = service.get_session_in_scope(session, scope, finding.session_id)
     fields: dict[str, object] = {"territory_id": vision_session.territory_id}
     if body.object_id is not None:
         # The link is made only by the person who passed the object.

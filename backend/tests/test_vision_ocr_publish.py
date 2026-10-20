@@ -14,14 +14,21 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import AdPost, AuditLog, Evidence, RiskScore, VisionFinding
+from app.models import AdPost, AuditLog, Evidence, RiskScore, VisionFinding, VisionSession
 from app.models.enums import AdOrigin, EvidenceKind, OcrStatus, Platform
 from app.modules.nlp import tasks as nlp_tasks
 from app.modules.nlp.ocr import ocr_image
 from app.modules.vision import media, tasks
 from app.worker.celery_app import celery_app
 from tests.conftest import World, auth, make_object
-from tests.test_vision_api import VISION, create_session, finding_body, make_jpeg, photo_frame
+from tests.test_vision_api import (
+    VISION,
+    create_legacy_region_session,
+    create_session,
+    finding_body,
+    make_jpeg,
+    photo_frame,
+)
 
 DEJAVU_FONTS = (
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -424,6 +431,71 @@ def test_publish_rejects_object_from_another_city_in_the_same_scope(
     assert db.scalar(select(func.count()).select_from(Evidence).where(Evidence.ad_post_id.is_not(None))) == 0
     row = db.get(VisionFinding, finding["id"])
     assert row is not None and row.ad_post_id is None and row.confirmed_text is None
+
+
+def test_legacy_region_session_is_refined_before_publish_and_keeps_exact_city_guard(
+    client: TestClient, db: Session, world: World
+) -> None:
+    user = world.users["mio_region"]
+    legacy = create_legacy_region_session(db, user, world.region.id)
+    frame = photo_frame(client, user, legacy.id)
+
+    def confirmed_for_frame() -> dict[str, Any]:
+        response = client.post(
+            f"{VISION}/sessions/{legacy.id}/findings",
+            json=finding_body(frame["id"]),
+            headers=auth(user),
+        )
+        assert response.status_code == 201, response.text
+        finding: dict[str, Any] = response.json()
+        reviewed = client.post(
+            f"{VISION}/findings/{finding['id']}/review", json={"action": "confirm"}, headers=auth(user)
+        )
+        assert reviewed.status_code == 200, reviewed.text
+        return finding
+
+    first = confirmed_for_frame()
+    region_publish = publish(client, user, first["id"])
+    assert region_publish.status_code == 422
+    assert region_publish.json()["detail"]["code"] == "city_required"
+    assert db.scalar(select(func.count()).select_from(AdPost).where(AdPost.origin == AdOrigin.vision)) == 0
+
+    refined = client.patch(f"{VISION}/sessions/{legacy.id}", json={"territory_id": world.ust.id}, headers=auth(user))
+    assert refined.status_code == 200, refined.text
+    ust_object = make_object(db, world.ust)
+    ad_id = publish(client, user, first["id"], object_id=ust_object.id).json()["ad_id"]
+    ad = db.get(AdPost, ad_id)
+    assert ad is not None and (ad.territory_id, ad.object_id) == (world.ust.id, ust_object.id)
+
+    second = confirmed_for_frame()
+    semey_object = make_object(db, world.semey)
+    mismatch = publish(client, user, second["id"], object_id=semey_object.id)
+    assert mismatch.status_code == 422
+    assert mismatch.json()["detail"]["code"] == "territory_mismatch"
+    assert db.scalar(select(func.count()).select_from(AdPost).where(AdPost.origin == AdOrigin.vision)) == 1
+
+
+def test_legacy_region_refinement_is_rejected_after_any_finding_was_published(
+    client: TestClient, db: Session, world: World
+) -> None:
+    city_user = world.users["mio_ust"]
+    finding = confirmed_finding(client, db, city_user)
+    ad_id = publish(client, city_user, finding["id"]).json()["ad_id"]
+    legacy = db.get(VisionSession, finding["session"]["id"])
+    assert legacy is not None
+    legacy.territory_id = world.region.id
+    db.flush()
+
+    response = client.patch(
+        f"{VISION}/sessions/{legacy.id}", json={"territory_id": world.ust.id}, headers=auth(world.users["mio_region"])
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "session_already_published"
+    db.refresh(legacy)
+    assert legacy.territory_id == world.region.id
+    ad = db.get(AdPost, ad_id)
+    assert ad is not None and ad.territory_id == world.ust.id
 
 
 def test_publication_does_not_score_by_itself(

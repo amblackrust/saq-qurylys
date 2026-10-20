@@ -9,6 +9,7 @@ import { ObjectSelect } from '@/components/ObjectSelect';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { useEnum } from '@/i18n/useEnum';
+import { useCities } from '@/lib/territories';
 import { confidenceLevel } from '@/lib/confidenceLevel';
 
 interface Props {
@@ -23,6 +24,7 @@ export function OutdoorAdBox({ finding, session, config }: Props) {
   const e = useEnum();
   const runOcr = useRunOcr();
   const publish = usePublishAd();
+  const { cities, isPending: citiesPending } = useCities();
   const [draft, setDraft] = useState<string | null>(null);
   const [objectId, setObjectId] = useState<number | null>(session.object?.id ?? null);
 
@@ -31,6 +33,7 @@ export function OutdoorAdBox({ finding, session, config }: Props) {
   const confirmed = finding.review_state === 'confirmed';
   const notApplicable = finding.status === 'not_applicable';
   const canOcr = config.ocr_enabled && finding.bbox !== null && finding.frame_id !== null;
+  const cityRequired = citiesPending || !cities.some((city) => city.id === session.territory_id);
 
   return (
     <div className="flex flex-col gap-3 rounded border border-border bg-surface-sunken p-3">
@@ -85,17 +88,20 @@ export function OutdoorAdBox({ finding, session, config }: Props) {
             value={objectId}
             onChange={setObjectId}
             territoryId={session.territory_id ?? undefined}
+            disabled={cityRequired}
           />
           <div className="flex flex-wrap items-center gap-2">
             <Button
               size="sm"
-              disabled={!confirmed || notApplicable || text.trim() === ''}
+              disabled={cityRequired || !confirmed || notApplicable || text.trim() === ''}
               loading={publish.isPending}
               onClick={() => publish.mutate({ id: finding.id, text: text.trim(), object_id: objectId })}
             >
               {t('publish.create')}
             </Button>
-            {notApplicable ? (
+            {cityRequired ? (
+              <span className="text-sm text-text-3">{t('publish.cityRequired')}</span>
+            ) : notApplicable ? (
               <span className="text-sm text-text-3">{t('publish.notApplicable')}</span>
             ) : (
               !confirmed && <span className="text-sm text-text-3">{t('publish.needsConfirm')}</span>
