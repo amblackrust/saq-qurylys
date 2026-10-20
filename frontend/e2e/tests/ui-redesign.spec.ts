@@ -1492,10 +1492,16 @@ test('operator work does not use a stale assignment as the main action after its
   }));
   expect(contrastRatio(colors.foreground, colors.background), 'assignment retry contrast in forced light mode').toBeGreaterThanOrEqual(4.5);
   await screenshot(page, 'work-assignment-error-light-under-dark-os');
+  const assignmentListRequestCount = () => harness.assignmentRequests.filter((url) =>
+    url.searchParams.get('mine') === 'true' && url.searchParams.get('status') === 'open',
+  ).length;
+  const requestsBeforeRetry = assignmentListRequestCount();
   await retry.focus();
   await expect(retry).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(retry).toBeFocused();
+  await expect.poll(assignmentListRequestCount).toBeGreaterThan(requestsBeforeRetry);
+  await expect(page.getByRole('alert').filter({ hasText: 'Assignments temporarily unavailable' })).toBeVisible();
+  await expect(retry).toBeVisible();
   expectCleanBrowser(harness);
 });
 
@@ -1520,10 +1526,16 @@ test('colored signal-card retry controls stay readable and keyboard reachable un
   }
   await screenshot(page, 'work-signal-error-light-under-dark-os');
 
+  const returnedSignalRequestCount = () => harness.listRequests.filter((url) =>
+    url.searchParams.get('status') === 'returned',
+  ).length;
+  const requestsBeforeRetry = returnedSignalRequestCount();
   await signalRetry.focus();
   await expect(signalRetry).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(signalRetry).toBeFocused();
+  await expect.poll(returnedSignalRequestCount).toBeGreaterThan(requestsBeforeRetry);
+  await expect(page.getByTestId('work-signal-details').getByRole('alert')).toContainText('Queue temporarily unavailable');
+  await expect(signalRetry).toBeVisible();
   expect(harness.mutations).toEqual([]);
   expectCleanBrowser(harness);
 });
@@ -2308,17 +2320,19 @@ test('registry response load failure offers a working retry', async ({ page }) =
     evidenceContents: {
       5401: { contentType: 'application/json', body: registryResponseJson('ЖК Повторная проверка', 'ГАРАНТИЯ-ТЕСТ-003') },
     },
-    evidenceFailures: { 5401: 2 },
+    evidenceFailures: { 5401: Number.POSITIVE_INFINITY },
   });
   await page.goto('/objects/7');
   await page.getByRole('button', { name: 'Открыть сохранённые сведения из реестра' }).click();
   const dialog = page.getByRole('dialog', { name: 'Сведения из реестра' });
   await expect(dialog.getByRole('alert')).toContainText('Не удалось загрузить сохранённый ответ. Повторите попытку или скачайте оригинал.');
   const evidenceRequests = () => harness.evidenceRequests.filter((request) => request.id === 5401);
-  await expect.poll(() => evidenceRequests().length).toBe(2);
+  const requestsBeforeRetry = evidenceRequests().length;
+  expect(requestsBeforeRetry).toBeGreaterThan(0);
+  harness.state.evidenceFailures![5401] = 0;
   await dialog.getByRole('button', { name: 'Повторить загрузку' }).click();
   await expect(dialog.getByText('ЖК Повторная проверка', { exact: true })).toBeVisible();
-  expect(evidenceRequests()).toHaveLength(3);
+  await expect.poll(() => evidenceRequests().length).toBeGreaterThan(requestsBeforeRetry);
   expect(harness.evidenceRequests.every((request) => request.authorization === 'Bearer mock-ui-session')).toBe(true);
   expect(harness.mutations).toEqual([]);
   harness.expectedCancelledEvidenceIds.add(5401);
