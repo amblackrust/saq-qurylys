@@ -2,16 +2,20 @@
 
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
 from playwright.sync_api import BrowserContext, Page, Response, Route, ViewportSize, sync_playwright
 from playwright.sync_api import Error as PlaywrightError
+from sqlalchemy import text
+from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
 from app import storage
+from app.db import get_engine
 from app.models import AdPost, Notification
 from app.models.enums import AdVersionSource, CaptureStatus, EvidenceKind, NotificationKind, Platform
 from app.modules.ads.urls import UnsafeUrlError, detect_platform, ensure_public_url, telegram_embed_url
@@ -63,6 +67,51 @@ class PageCapture:
     final_url: str
     text: str
     published_at: datetime | None
+
+
+@contextmanager
+def _capture_advisory_lock(ad_post_id: int) -> Iterator[None]:
+    """Serialize captures across workers without holding an ORM transaction during Chromium."""
+    connection = get_engine().connect()
+    lock_key = -ad_post_id  # AdPost identity keys are positive; negative bigint keys are reserved for captures.
+    locked = False
+    try:
+        try:
+            connection.execute(text("SELECT pg_advisory_lock(:lock_key)"), {"lock_key": lock_key}).close()
+            connection.commit()  # Session-level advisory locks survive this transaction.
+            locked = True
+        except Exception:
+            _discard_capture_lock_connection(connection, ad_post_id)
+            raise
+
+        try:
+            yield
+        finally:
+            if locked and not connection.invalidated:
+                try:
+                    released = connection.scalar(text("SELECT pg_advisory_unlock(:lock_key)"), {"lock_key": lock_key})
+                    connection.commit()
+                    if released is not True:
+                        logger.error("archive.capture: advisory lock for ad_post %s was not held", ad_post_id)
+                except Exception:
+                    logger.exception("archive.capture: could not release advisory lock for ad_post %s", ad_post_id)
+                    _discard_capture_lock_connection(connection, ad_post_id)
+    finally:
+        try:
+            connection.close()
+        except Exception:
+            logger.exception("archive.capture: could not close advisory-lock connection for ad_post %s", ad_post_id)
+            if not connection.invalidated:
+                _discard_capture_lock_connection(connection, ad_post_id)
+
+
+def _discard_capture_lock_connection(connection: Connection, ad_post_id: int) -> None:
+    try:
+        connection.invalidate()
+    except Exception:
+        logger.exception("archive.capture: could not invalidate advisory-lock connection for ad_post %s", ad_post_id)
+        if not connection.invalidated:
+            connection.detach()  # detached connections are closed, rather than returned to the pool, on close
 
 
 def _clean_text(value: str) -> str:
@@ -232,10 +281,28 @@ def capture_ad(
 ) -> None:
     """Capture the publication's URL into evidence and fill in what the page tells (text, publication time).
 
-    A failure is recorded on the post (and reported to the requesting user), never raised: the analysis of
-    the post goes on with the data it has.
+    Page-capture and evidence failures are recorded on the post (and reported to the requesting user), so analysis
+    goes on with the data it has. Database and advisory-lock failures propagate to the task.
     """
     ad = session.get(AdPost, ad_post_id)
+    if ad is None:
+        logger.warning("archive.capture: ad_post %s does not exist", ad_post_id)
+        return
+    if ad.url is None or ad.capture_status is CaptureStatus.done:
+        return
+    session.commit()  # release the ORM connection before acquiring a second, pinned connection for the lock
+
+    with _capture_advisory_lock(ad_post_id):
+        _capture_ad_locked(session, ad_post_id, requested_by, page_capture)
+
+
+def _capture_ad_locked(
+    session: Session,
+    ad_post_id: int,
+    requested_by: int | None,
+    page_capture: Callable[[str], PageCapture],
+) -> None:
+    ad = session.get(AdPost, ad_post_id, populate_existing=True)
     if ad is None:
         logger.warning("archive.capture: ad_post %s does not exist", ad_post_id)
         return
@@ -262,8 +329,8 @@ def capture_ad(
         error = (str(exc).splitlines() or [""])[0][:MAX_ERROR_CHARS] or type(exc).__name__
         if not isinstance(exc, CaptureError):
             logger.exception("archive.capture: unexpected failure for ad_post %s", ad_post_id)
-        ad = session.get(AdPost, ad_post_id)
-        if ad is None:
+        ad = session.get(AdPost, ad_post_id, populate_existing=True)
+        if ad is None or ad.capture_status is CaptureStatus.done:
             return
         ad.capture_status = CaptureStatus.failed
         ad.capture_error = error

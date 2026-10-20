@@ -3,6 +3,8 @@ import logging
 import socket
 import struct
 import threading
+import time
+import uuid
 from collections.abc import Callable, Iterable, Iterator
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -10,7 +12,7 @@ from typing import Any
 
 import httpx
 import pytest
-from sqlalchemy import select
+from sqlalchemy import Engine, select, text
 from sqlalchemy.orm import Session
 
 from app import storage
@@ -37,6 +39,47 @@ from tests.support_ads import add_ad
 from tests.support_collect import collect_locks  # noqa: F401
 
 DAYS_AGO = timedelta(days=4)  # older than the default `recheck_after_days` (3)
+
+
+def _create_committed_capture_ad(engine: Engine) -> int:
+    with Session(engine) as session:
+        ad = AdPost(
+            platform=Platform.website,
+            external_id=f"capture-lock-{uuid.uuid4().hex}",
+            url="https://alatau.test/capture-lock",
+            text=None,
+            capture_status=CaptureStatus.pending,
+        )
+        session.add(ad)
+        session.commit()
+        return ad.id
+
+
+def _delete_committed_capture_ad(engine: Engine, ad_post_id: int) -> None:
+    with Session(engine) as session:
+        ad = session.get(AdPost, ad_post_id)
+        if ad is not None:
+            session.delete(ad)
+            session.commit()
+
+
+def _capture_lock_is_waiting(engine: Engine) -> bool:
+    with engine.connect() as connection:
+        return bool(
+            connection.scalar(
+                text(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1 FROM pg_stat_activity
+                        WHERE datname = current_database()
+                          AND wait_event_type = 'Lock'
+                          AND wait_event = 'advisory'
+                          AND query LIKE '%pg_advisory_lock%'
+                    )
+                    """
+                )
+            )
+        )
 
 
 class SessionFactory:
@@ -670,6 +713,165 @@ def test_capture_refuses_internal_addresses_without_starting_a_browser(db: Sessi
     )
     capture.capture_ad(db, ad.id, None)
     assert ad.capture_status is CaptureStatus.failed and "внутренней сети" in (ad.capture_error or "")
+
+
+def test_concurrent_capture_is_serialized_and_done_capture_is_idempotent(
+    engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ad_post_id = _create_committed_capture_ad(engine)
+    capture_entered = threading.Event()
+    release_capture = threading.Event()
+    second_started = threading.Event()
+    first_calls: list[str] = []
+    second_calls: list[str] = []
+    evidence_calls: list[tuple[int | None, EvidenceKind]] = []
+    thread_errors: list[Exception] = []
+    page = capture.PageCapture(
+        png=PNG_BYTES,
+        mhtml=b"From: capture-lock-test",
+        final_url="https://alatau.test/capture-lock",
+        text="",
+        published_at=None,
+    )
+
+    def store_evidence(
+        session: Session,
+        data: bytes,
+        kind: EvidenceKind,
+        content_type: str,
+        source_url: str | None = None,
+        *,
+        link: EvidenceLink,
+        created_by: int | None = None,
+        captured_at: datetime | None = None,
+    ) -> Evidence:
+        evidence_calls.append((link.ad_post_id, kind))
+        return Evidence(id=len(evidence_calls))
+
+    def first_page_capture(url: str) -> capture.PageCapture:
+        first_calls.append(url)
+        capture_entered.set()
+        if not release_capture.wait(timeout=10):
+            raise AssertionError("first capture was not released")
+        return page
+
+    def second_page_capture(url: str) -> capture.PageCapture:
+        second_calls.append(url)
+        raise capture.CaptureError("duplicate capture should not run")
+
+    def run_capture(page_capture: Callable[[str], capture.PageCapture]) -> None:
+        try:
+            with Session(engine) as session:
+                capture.capture_ad(session, ad_post_id, None, page_capture=page_capture)
+        except Exception as exc:
+            thread_errors.append(exc)
+
+    def run_second_capture() -> None:
+        second_started.set()
+        run_capture(second_page_capture)
+
+    monkeypatch.setattr(storage, "put_evidence", store_evidence)
+    first = threading.Thread(target=run_capture, args=(first_page_capture,))
+    second: threading.Thread | None = None
+    lock_wait_observed = False
+    final_status: CaptureStatus | None = None
+    try:
+        first.start()
+        assert capture_entered.wait(timeout=5)
+        second = threading.Thread(target=run_second_capture)
+        second.start()
+        assert second_started.wait(timeout=5)
+
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if _capture_lock_is_waiting(engine):
+                lock_wait_observed = True
+                break
+            time.sleep(0.01)
+    finally:
+        release_capture.set()
+        first.join(timeout=10)
+        if second is not None:
+            second.join(timeout=10)
+        if not first.is_alive() and (second is None or not second.is_alive()):
+            try:
+                with Session(engine) as session:
+                    ad = session.get(AdPost, ad_post_id)
+                    final_status = ad.capture_status if ad is not None else None
+            finally:
+                _delete_committed_capture_ad(engine, ad_post_id)
+
+    assert lock_wait_observed
+    assert not first.is_alive() and (second is None or not second.is_alive())
+    assert thread_errors == []
+    assert first_calls == ["https://alatau.test/capture-lock"]
+    assert second_calls == []
+    assert final_status is CaptureStatus.done
+    assert evidence_calls == [
+        (ad_post_id, EvidenceKind.screenshot_png),
+        (ad_post_id, EvidenceKind.archive_mhtml),
+    ]
+
+
+def test_capture_failure_does_not_overwrite_a_done_status_after_reload(engine: Engine) -> None:
+    ad_post_id = _create_committed_capture_ad(engine)
+
+    def page_fails_after_another_writer_finishes(url: str) -> capture.PageCapture:
+        with Session(engine) as success_session:
+            ad = success_session.get(AdPost, ad_post_id)
+            assert ad is not None
+            ad.capture_status = CaptureStatus.done
+            success_session.commit()
+        raise capture.CaptureError("late capture failure")
+
+    try:
+        with Session(engine) as session:
+            capture.capture_ad(session, ad_post_id, None, page_capture=page_fails_after_another_writer_finishes)
+        with Session(engine) as session:
+            ad = session.get(AdPost, ad_post_id)
+            assert ad is not None
+            assert ad.capture_status is CaptureStatus.done and ad.capture_error is None
+    finally:
+        _delete_committed_capture_ad(engine, ad_post_id)
+
+
+def test_capture_can_retry_after_a_failed_attempt(db: Session, world: World, monkeypatch: pytest.MonkeyPatch) -> None:
+    ad = add_ad(db, world.ust, None, url="https://alatau.test/retry", capture_status=CaptureStatus.pending)
+    page = capture.PageCapture(
+        png=PNG_BYTES,
+        mhtml=b"From: retry-test",
+        final_url="https://alatau.test/retry",
+        text="",
+        published_at=None,
+    )
+    evidence_calls: list[EvidenceKind] = []
+
+    def store_evidence(
+        session: Session,
+        data: bytes,
+        kind: EvidenceKind,
+        content_type: str,
+        source_url: str | None = None,
+        *,
+        link: EvidenceLink,
+        created_by: int | None = None,
+        captured_at: datetime | None = None,
+    ) -> Evidence:
+        evidence_calls.append(kind)
+        return Evidence(id=len(evidence_calls))
+
+    monkeypatch.setattr(storage, "put_evidence", store_evidence)
+
+    def failed_capture(url: str) -> capture.PageCapture:
+        raise capture.CaptureError("upstream unavailable")
+
+    capture.capture_ad(db, ad.id, None, page_capture=failed_capture)
+    assert ad.capture_status is CaptureStatus.failed and ad.capture_error == "upstream unavailable"
+
+    capture.capture_ad(db, ad.id, None, page_capture=lambda url: page)
+
+    assert ad.capture_status is CaptureStatus.done and ad.capture_error is None
+    assert evidence_calls == [EvidenceKind.screenshot_png, EvidenceKind.archive_mhtml]
 
 
 def test_unexpected_evidence_failure_rolls_back_partial_evidence(
