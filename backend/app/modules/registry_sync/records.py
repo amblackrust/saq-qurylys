@@ -14,7 +14,7 @@ from app.models.enums import DocType
 API_BASE = "https://api.homeportal.kz/api/v1"
 
 # Bases of raising money from shareholders. The permit of the local executive body (МИО) is issued under the first
-# two (OPEN_QUESTIONS 12); a guarantee of АО «КЖК» is a document of its own.
+# two; a guarantee of АО «КЖК» is a document of its own.
 _PERMIT_BASES = frozenset({"разрешение мио", "участие бву"})
 _GUARANTEE_MARK = "гарант"
 

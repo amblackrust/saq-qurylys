@@ -566,7 +566,7 @@ def return_card(session: Session, view: CardView, user: AppUser, comment: str, r
 
 def may_respond(user: AppUser, card: SignalCard) -> bool:
     """A receiving body answers cards addressed to it; a card addressed to the MIO itself is answered by
-    a mio officer (OPEN_QUESTIONS #15)."""
+    a mio officer."""
     if user.role is Role.mio_officer:
         return card.recipient is Recipient.mio
     return ROLE_RECIPIENT.get(user.role) == card.recipient

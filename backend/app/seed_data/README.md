@@ -33,7 +33,7 @@ Production calendar overrides. Saturdays and Sundays are days off by default.
 
 ## `demo_objects.json` (only with `--demo`)
 
-Fictional data only (docs/OPEN_QUESTIONS.md, item 1; SPEC D19): objects, developers, people, phones
+Fictional data only (SPEC D19): objects, developers, people, phones
 (`+7 700 000 xx xx`) and URLs (`https://example.invalid/...`) are invented, BINs start with `99`. All demo objects
 and all demo ads are created with `is_demo=true`. An object that already exists (`is_demo` and same `name`) is
 skipped together with its children, so re-running never duplicates data. Unknown keys are rejected.
@@ -187,7 +187,7 @@ Unknown keys are rejected. Per object:
 After the facts are loaded, the ads of these objects are analysed (the dictionary hits are what R2 reads) and
 `replay_history` runs the risk engine for every new demo object over the last 26 weeks, weekly, at UTC midnight:
 `risk_score` rows with `trigger=replay`. Nothing is painted by hand. Stage and readiness are the current ones: there is
-no history of them (OPEN_QUESTIONS 34). The story of the three control scenarios:
+no history of them. The story of the three control scenarios:
 
 | Object | Replayed zones, oldest to newest |
 |---|---|

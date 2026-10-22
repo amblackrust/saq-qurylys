@@ -56,7 +56,7 @@ def load_scoring_input(
     on or before it is loaded. Ads are taken by their timestamp, complaints by `received_at` (a verification
     counts once `verified_at` has come), documents by the check date (`created_at` when it has none), inspections
     by their date. Everything else (ad status, phrase hits, complaint status, the passport of the object) is
-    read as it is now: its history is not kept (OPEN_QUESTIONS 34).
+    read as it is now because its history is not kept.
     """
     documents_stmt = select(Document).where(
         Document.object_id == obj.id, Document.doc_type.in_(engine.LEGAL_BASIS_DOC_TYPES)

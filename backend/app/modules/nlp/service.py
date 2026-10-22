@@ -307,7 +307,7 @@ def link_ad(session: Session, ad: AdPost) -> tuple[int | None, int | None]:
     if ad.status is not AdStatus.removed_saved:
         confident = object_id is not None and not ambiguous and confidence is not None and confidence >= threshold
         # A post nobody on staff looked at (collected, sent by a citizen) counts only once a person confirms the
-        # guessed link; an account that staff bound to the object is not a guess (OPEN_QUESTIONS 29).
+        # guessed link; an account that staff bound to the object is not a guess.
         if ad.origin in UNREVIEWED_ORIGINS and method is not LinkMethod.account:
             confident = False
         if not confident:

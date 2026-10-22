@@ -1,7 +1,8 @@
 """One-off import of the open Kazreestr dataset from Ashyq Data: `python -m app.modules.registry_sync.ashyq`.
 
 Dataset «Объекты с долевым участием в жилищном строительстве» (Smart Data Ukimet), CC BY 3.0 NZ. The file is
-downloaded by hand (docs/DATA_SOURCES.md, OPEN_QUESTIONS 41) and is untrusted input: it is only parsed with `csv`.
+downloaded by hand following the procedure in `docs/DATA_SOURCES.md` and is untrusted input: it is only parsed
+with `csv`.
 
 Rows are per object, "пятно" or block, so a complex has several rows. They are grouped by normalized name and
 builder, and each group is matched with an object of the city by name. What the dataset gives is a number whose

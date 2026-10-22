@@ -212,5 +212,5 @@ Used only by the optional `vision` worker images (`docker compose --profile visi
 - PyTorch (https://pytorch.org): BSD-3-Clause-style licence. The GPU image also contains NVIDIA CUDA runtime libraries
   distributed with the PyTorch wheels under the NVIDIA CUDA EULA.
 - Ultralytics YOLO / YOLO-World / YOLOE were not used on purpose: they are AGPL-3.0.
-- The evaluation of the detector (docs/SAQ_VISION_EVAL.md) used a construction-site video from Wikimedia Commons (kept
-  locally as haringey-construction-16.webm), licence CC BY-SA 4.0; the video and frames are not stored in the repository.
+- A local detector evaluation used the construction-site video `haringey-construction-16.webm` from Wikimedia Commons
+  under the CC BY-SA 4.0 licence. The video and extracted frames are not stored in the repository.

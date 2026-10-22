@@ -146,7 +146,7 @@ def _archive_and_mail(
     session: Session, background: BackgroundTasks, view: service.CardView, user: AppUser, recipient: Recipient
 ) -> None:
     """After the dispatch is committed: render the PDF of the card as sent, keep it as immutable evidence
-    (OPEN_QUESTIONS #16) and mail it to the receiving body's addresses. None of this can undo the dispatch:
+    and mail it to the receiving body's addresses. None of this can undo the dispatch:
     a failure is logged and, when the copy could not be archived, reported to the sender as a notification."""
     card_id, number, locale = view.card.id, view.card.number, user.locale.value
     sender_id = user.id

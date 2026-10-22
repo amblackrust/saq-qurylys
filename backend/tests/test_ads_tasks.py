@@ -273,8 +273,8 @@ def test_page_that_says_the_post_is_gone_counts_as_removed(db: Session, world: W
 
 @pytest.mark.parametrize("origin", [AdOrigin.collector, AdOrigin.citizen])
 def test_removal_does_not_confirm_a_guessed_link(db: Session, world: World, origin: AdOrigin) -> None:
-    """OPEN_QUESTIONS 27, 29: a collected or reported post linked by name counts only after a person confirms the
-    link. The post being deleted from the source does not make that guess count."""
+    """A collected or reported post linked by name counts only after a person confirms the link. The post being
+    deleted from the source does not make that guess count."""
     obj = make_object(db, world.ust, "Жилой комплекс Нур Плаза")
     ad = due_ad(
         db,

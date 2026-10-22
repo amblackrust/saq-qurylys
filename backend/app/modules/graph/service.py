@@ -200,7 +200,7 @@ def _add_ads(graph: _Graph, session: Session, scope: TerritoryScope, source_keys
                 platform=platform,
             )
         )
-        # A link nobody confirmed may be a guess (OPEN_QUESTIONS 27, 29): it must not tie an object to the phone or
+        # A link nobody confirmed may be a guess: it must not tie an object to the phone or
         # account of the publication, or a realtor's number would join two developers.
         if object_id is not None and status is not AdStatus.verification:
             graph.link(key, f"object:{object_id}", "ad_object")

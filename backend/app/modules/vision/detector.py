@@ -19,8 +19,8 @@ from app.models.enums import VisionCategory
 
 logger = logging.getLogger(__name__)
 
-# Text prompts of the detector and the category each phrase stands for. Tuned on the frames described in
-# docs/SAQ_VISION_EVAL.md; changing a phrase changes what is found, so the prompts are stored with every run.
+# Text prompts of the detector and the category each phrase stands for. Changing a phrase changes what is found,
+# so the prompts are stored with every run.
 CATEGORY_PROMPTS: dict[VisionCategory, tuple[str, ...]] = {
     VisionCategory.outdoor_ad: ("billboard", "advertising banner"),
     VisionCategory.fence: ("construction fence", "fence"),
@@ -192,8 +192,8 @@ class GroundingDinoDetector:
             model = AutoModelForZeroShotObjectDetection.from_pretrained(model_id)
         except OSError as exc:  # weights absent from the cache (the image is offline at run time)
             raise DetectorUnavailable(f"weights of {model_id} are not available: {exc}") from exc
-        # fp16 on a GPU: 1.8x faster and half the memory, boxes agree with fp32 (IoU 0.99; only borderline-threshold
-        # detections differ), see docs/SAQ_VISION_EVAL.md. The CPU always uses fp32.
+        # fp16 on a GPU reduces memory and can change detections near the confidence
+        # threshold. The CPU always uses fp32.
         self._half = half and device == "cuda"
         self.precision = "fp16" if self._half else "fp32"
         self._model = (model.half() if self._half else model).to(device).eval()

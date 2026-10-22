@@ -1,7 +1,6 @@
-# SAQ VISION — архитектура (Этап 0)
+# SAQ VISION — архитектура
 
-План и целевое поведение — [SAQ_VISION_PLAN.md](SAQ_VISION_PLAN.md). Здесь — как модуль встраивается в текущий
-код, принятые решения и контракт API. Журнал выполнения — [SAQ_VISION_PROGRESS.md](SAQ_VISION_PROGRESS.md).
+Здесь описаны текущая интеграция SAQ VISION, принятые решения и контракт API.
 
 ## 1. Что есть в коде и что из этого следует
 
@@ -136,7 +135,7 @@
   повторный запрос — 409. `processing` сессии истинно и пока прогон `queued|running`.
 - Устройство: `VISION_DETECTOR_DEVICE=auto|cpu|cuda` (`auto` → CUDA, если видна). Образ `vision` — CPU-колёса torch,
   `vision-gpu` — CUDA 12.8; в прогон записывается фактическое устройство (`config.device`). Запускать нужно один из
-  воркеров `vision-worker` / `vision-worker-gpu`, не оба. Оценка качества и скорости — [SAQ_VISION_EVAL.md](SAQ_VISION_EVAL.md).
+  воркеров `vision-worker` / `vision-worker-gpu`, не оба. Настройки запуска и ресурсов приведены в [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## 6. Что не делаем
 

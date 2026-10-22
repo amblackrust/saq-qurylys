@@ -128,7 +128,7 @@ def recheck_due(session: Session, client: httpx.Client) -> list[int]:
         if removed:
             before = audit.snapshot(ad)
             # The removal does not confirm a link nobody confirmed: such a post stays in `verification`, out of
-            # the score (OPEN_QUESTIONS 27, 29). `removed_detected_at` is what says it is gone.
+            # the score. `removed_detected_at` is what says it is gone.
             if ad.status is not AdStatus.verification:
                 ad.status = AdStatus.removed_saved
             ad.removed_detected_at = now

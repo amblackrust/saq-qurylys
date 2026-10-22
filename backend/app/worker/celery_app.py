@@ -50,7 +50,7 @@ celery_app.conf.update(
     beat_schedule={
         "collect-run-all": {"task": "collect.run_all", "schedule": crontab(hour="*/3", minute=0)},
         "risk-sweep-due": {"task": "risk.sweep_due", "schedule": crontab(hour=2, minute=0)},
-        # Does nothing unless HOMEPORTAL_SYNC_ENABLED=true (needs the agreement of АО «КЖК», OPEN_QUESTIONS 11).
+        # Does nothing unless HOMEPORTAL_SYNC_ENABLED=true (which needs the agreement of АО «КЖК»).
         "registry-sync-homeportal": {
             "task": "registry.sync_homeportal",
             "schedule": crontab(hour=3, minute=0),

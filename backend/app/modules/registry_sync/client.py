@@ -1,8 +1,7 @@
 """Client of the public API behind homeportal.kz (АО «КЖК»).
 
-The API is undocumented: it is what the site itself calls. Regular use needs the agreement of АО «КЖК»
-(docs/OPEN_QUESTIONS.md, item 11), so the client is deliberately polite: one request at a time, a pause between
-requests and a User-Agent that says who is asking.
+The API is undocumented: it is what the site itself calls. Regular use needs the agreement of АО «КЖК», so the
+client is deliberately polite: one request at a time, a pause between requests and a User-Agent that says who is asking.
 """
 
 import time

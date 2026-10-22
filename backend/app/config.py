@@ -66,12 +66,11 @@ class Settings(BaseSettings):
 
     max_upload_mb: int = Field(default=25, ge=1)
 
-    # The scheduled sync of the housing portal registry stays off until АО «КЖК» agrees to it (OPEN_QUESTIONS 11).
+    # The scheduled sync of the housing portal registry stays off until АО «КЖК» agrees to it.
     # An administrator can still start a run by hand.
     homeportal_sync_enabled: bool = False
 
-    # Automatic collection of publications (SPEC 10.1). Every collector is off until enabled: real sources are
-    # collected only by a deployment that chose to (OPEN_QUESTIONS 30).
+    # Automatic collection of publications (SPEC 10.1). Every collector is off until enabled by the deployment.
     collect_telegram_enabled: bool = False
     collect_olx_enabled: bool = False
     collect_krisha_enabled: bool = False

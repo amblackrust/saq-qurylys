@@ -66,7 +66,7 @@ export function ActionsBar({ detail, recipient, dirty, canSave }: Props) {
   const apply = useApplySignal();
 
   const canReview = canManageSignals && detail.status === 'requires_confirmation';
-  // A card addressed to the MIO itself is answered by a mio officer (OPEN_QUESTIONS #15).
+  // A card addressed to the MIO itself is answered by a mio officer.
   const canRespond =
     detail.status === 'sent' &&
     ((isRecipient && user?.role === detail.recipient) || (user?.role === 'mio_officer' && detail.recipient === 'mio'));

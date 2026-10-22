@@ -682,7 +682,7 @@ def _checked_search_url(url: str | None) -> str:
 
 
 def _reject_aggregator_object(object_id: int | None) -> None:
-    """A saved search returns the listings of any seller, so it cannot vouch for an object (OPEN_QUESTIONS 29)."""
+    """A saved search returns the listings of any seller, so it cannot vouch for an object."""
     if object_id is not None:
         raise api_error(
             422,

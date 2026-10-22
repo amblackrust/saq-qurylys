@@ -4,7 +4,7 @@ The snapshot is untrusted third-party data collected on one day. Only facts from
 no advertisements and no judgement about an object. The zone of every object is calculated by the risk module
 from what is stored here.
 
-What is imported (docs/OPEN_QUESTIONS.md items 11-13):
+What is imported from the snapshot:
 - every krisha.kz object (`objects`);
 - every registry record that no krisha.kz object claims reliably, except records the portal counts as completed
   (commissioning date in the past);

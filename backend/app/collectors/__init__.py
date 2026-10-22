@@ -22,7 +22,7 @@ from app.config import Settings, get_settings
 from app.models import SourceAccount
 from app.models.enums import Platform
 
-# Platforms that have a collector. TikTok is only added by link (OPEN_QUESTIONS 31).
+# Platforms that have a collector. TikTok is added by link only.
 COLLECTOR_PLATFORMS = (Platform.instagram, Platform.telegram, Platform.aggregator)
 
 

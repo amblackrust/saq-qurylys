@@ -38,7 +38,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Object detector of SAQ VISION (docs/SAQ_VISION_EVAL.md). Installed only in the Dockerfile `vision*` stages
+# Optional SAQ VISION object detector. Installed only in the Dockerfile `vision*` stages
 # (`uv sync --extra vision-cpu` or `--extra vision-gpu`, never both). The api and worker images do not contain it,
 # and the API never imports it.
 vision-cpu = [

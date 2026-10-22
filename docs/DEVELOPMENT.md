@@ -103,6 +103,20 @@ Queues: `collect`, `archive`, `nlp`, `score`, `notify`, `vision`, `default`. Tas
 Call `object_changed(object_id)` **after** committing a change to an object, its documents, complaints,
 inspections or ads. It is a no-op when `EVENTS_ENABLED=false`.
 
+## Optional local LLM (GPU)
+
+Compose provides Ollama through the `llm-gpu` profile. It requires an NVIDIA GPU and the NVIDIA Container Toolkit:
+
+```bash
+docker compose --profile llm-gpu up -d ollama
+docker compose exec ollama ollama pull qwen3.5:9b-q6k
+```
+
+Set `OLLAMA_URL=http://ollama:11434` and `ASSISTANT_BASE_URL=http://ollama:11434/v1` in `.env`. `OLLAMA_MODELS_DIR`
+can point to a host directory with models already downloaded; otherwise Compose stores them in the `ollamamodels`
+volume. The service publishes port 11434 on localhost, so stop a host `ollama serve` before starting it. Set
+`LLM_ENABLED=true` or `ASSISTANT_ENABLED=true` to enable the corresponding feature.
+
 ## SAQ VISION (визуальные проверки)
 
 Модуль выключен по умолчанию: `VISION_ENABLED=false` (маршрутов `/api/v1/vision/*` нет). Включение — `VISION_ENABLED=true`
@@ -134,9 +148,9 @@ docker compose stop vision-worker && docker compose --profile vision-gpu up -d -
 ```
 
 После этого загрузка фото и успешная обработка видео запускают прогон автоматически; существующую сессию можно
-пересчитать кнопкой/`POST /vision/sessions/{id}/reanalyze`. Результаты — подсказки модели без дообучения
-([SAQ_VISION_EVAL.md](SAQ_VISION_EVAL.md)); решения принимает человек. Память: модель ~0.7 ГБ весов, пик процесса
-воркера на CPU — см. таблицу в EVAL; `VISION_WORKER_CONCURRENCY` > 1 умножает потребление.
+пересчитать кнопкой/`POST /vision/sessions/{id}/reanalyze`. Результаты предобученной модели, не дообученной на
+данных этого кейса и строительных площадок, — только подсказки для проверки человеком. Для CPU закладывайте около 3
+ГБ памяти на каждую параллельную задачу; потребление растёт вместе с `VISION_WORKER_CONCURRENCY`.
 
 ## CSV import
 
@@ -183,7 +197,7 @@ Only objects within your territory are matched. Empty cells leave existing value
 ## Seed data files
 
 Optional files in `backend/app/seed_data/` (districts, holidays, demo objects) are loaded by `python -m app.seed`.
-Their formats are in [backend/app/seed_data/README.md](backend/app/seed_data/README.md).
+Their formats are in [backend/app/seed_data/README.md](../backend/app/seed_data/README.md).
 
 
 ## Telegram-бот
